@@ -45,6 +45,15 @@ class NativeTests(unittest.TestCase):
             p = Path(temp) / "server.log"
             p.write_text("one\ntwo\nthree\n")
             self.assertEqual(native_log_tail(p, 2), "two\nthree")
+    def test_embedded_console_api(self):
+        import inspect
+        self.assertTrue(callable(NativeProcess.send))
+        source = inspect.getsource(NativeProcess.start)
+        self.assertIn("CREATE_NO_WINDOW", source)
+        self.assertIn("stdout=subprocess.PIPE", source)
+        self.assertIn("stdin=subprocess.PIPE", source)
+        self.assertNotIn("CREATE_NEW_CONSOLE", source)
+
     def test_not_running_by_default(self):
         self.assertFalse(NativeProcess().running())
 
