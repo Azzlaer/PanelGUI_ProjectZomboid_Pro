@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import closing
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,7 +108,7 @@ class AuditStore:
     def __init__(self, filename):
         self.filename = str(filename)
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.filename, timeout=10) as db:
+        with closing(sqlite3.connect(self.filename, timeout=10)) as db:
             db.execute("""CREATE TABLE IF NOT EXISTS audit (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               timestamp TEXT NOT NULL,
@@ -115,15 +116,17 @@ class AuditStore:
               detail TEXT NOT NULL,
               success INTEGER NOT NULL
             )""")
+            db.commit()
 
     def record(self, kind: str, detail: str, success=True):
-        with sqlite3.connect(self.filename, timeout=10) as db:
+        with closing(sqlite3.connect(self.filename, timeout=10)) as db:
             db.execute("INSERT INTO audit(timestamp,kind,detail,success) VALUES(?,?,?,?)",
                 (datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  str(kind)[:80], str(detail)[:500], int(bool(success))))
+            db.commit()
 
     def recent(self, limit=100):
-        with sqlite3.connect(self.filename, timeout=10) as db:
+        with closing(sqlite3.connect(self.filename, timeout=10)) as db:
             return db.execute(
                 "SELECT timestamp,kind,detail,success FROM audit ORDER BY id DESC LIMIT ?",
                 (max(1, min(int(limit), 1000)),)).fetchall()
