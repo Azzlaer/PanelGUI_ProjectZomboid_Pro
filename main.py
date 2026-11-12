@@ -12,13 +12,15 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
+from pz_backup import (create_verified_backup, inspect_backup, stage_restore, prune_backups, due_daily)
 from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
                          replace_ini_keys, discord_webhook, safe_extract_plan)
 
 ROOT = Path(os.getenv("APPDATA") or Path.home()) / "PanelGUI_ProjectZomboid_Pro"
 ROOT.mkdir(parents=True, exist_ok=True)
 CONFIG = ROOT / "config.json"
-DEFAULT = dict(webhook="", container="pz-game-server", host="127.0.0.1", port=27015,
+DEFAULT = dict(backup_hour=3, backup_enabled=False, backup_last="", backup_keep=7,
+               webhook="", container="pz-game-server", host="127.0.0.1", port=27015,
                password="", data_dir="", ini_file="", backup_dir=str(ROOT / "backups"))
 BG, SURFACE, FG, ACCENT = "#101827", "#1a283a", "#e8f0f8", "#4daee8"
 
@@ -100,12 +102,14 @@ class Application(tk.Tk):
         super().__init__()
         self.config_data = load_config()
         self.audit = AuditStore(ROOT / "audit.sqlite3")
-        self.title("PanelGUI Project Zomboid PRO | Desktop v1.1")
+        self.title("PanelGUI Project Zomboid PRO | Desktop v1.2")
         self.geometry("1120x740")
         self.minsize(850, 580)
         self.configure(bg=BG)
         self.events = queue.Queue()
         self.active = None
+        self.backup_busy = False
+        self.status_busy = False
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
         self.style.configure(".", background=BG, foreground=FG, font=("Segoe UI", 10))
@@ -132,6 +136,7 @@ class Application(tk.Tk):
         self.build_players()
         self.build_mods()
         self.build_activity()
+        self.build_logs()
         self.build_settings()
         self.output = tk.Text(self, height=7, bg="#0c1220", fg="#cddced", insertbackground="white",
                               relief="flat", wrap="word", font=("Consolas", 10))
@@ -139,6 +144,7 @@ class Application(tk.Tk):
         self.log("Listo. Configura Docker, RCON y rutas desde Ajustes.")
         self.after(100, self.consume)
         self.after(800, self.refresh_status)
+        self.after(60_000, self.periodic)
     def log(self, value):
         self.output.insert("end", datetime.now().strftime("[%H:%M:%S] ") + str(value) + "\n")
         self.output.see("end")
@@ -157,10 +163,19 @@ class Application(tk.Tk):
                 if kind == "error":
                     self.log("ERROR " + label + ": " + result)
                     self.audit.record("error", label, False)
+                    if label == "Estado":
+                        self.state_var.set("Docker: error")
+                        self.status_busy = False
+                    if label.startswith("Backup"):
+                        self.backup_busy = False
                 else:
                     self.log(label + ": " + str(result)[:1800])
-                    if not label.startswith("Estado"):
+                    if not label.startswith(("Estado", "Logs")):
                         self.audit.record("accion", label, True)
+                    if label == "Estado":
+                        self.status_busy = False
+                    if label.startswith("Backup"):
+                        self.backup_busy = False
                     if callback:
                         callback(result)
         except queue.Empty:
@@ -188,6 +203,9 @@ class Application(tk.Tk):
                                    font=("Consolas", 11))
         self.status_text.pack(fill="both", expand=True, padx=12, pady=15)
     def refresh_status(self):
+        if self.status_busy:
+            return
+        self.status_busy = True
         name = self.config_data["container"]
         self.submit("Estado", lambda: docker("inspect", "-f", "{{json .State}}", name),
                     self.show_status)
@@ -205,8 +223,8 @@ class Application(tk.Tk):
         self.submit("Docker " + action, lambda: docker(action, name, timeout=120),
                     lambda _: self.refresh_status())
     def view_logs(self):
-        name = self.config_data["container"]
-        self.submit("Logs Docker", lambda: docker("logs", "--tail", "120", name))
+        self.tabs.select(self.logs_page)
+        self.refresh_logs()
     def view_stats(self):
         name = self.config_data["container"]
         self.submit("Recursos", lambda: docker("stats", "--no-stream",
@@ -272,6 +290,66 @@ class Application(tk.Tk):
             self.log("INI guardado. Reinicia el servidor para aplicar cambios. Respaldo: " + str(bak))
         except Exception as exc:
             messagebox.showerror("Guardar INI", str(exc))
+    def build_logs(self):
+        page = self.tab("Logs")
+        self.logs_page = page
+        header = ttk.Frame(page)
+        header.pack(fill="x", padx=12, pady=10)
+        ttk.Label(header, text="Filtro").pack(side="left", padx=5)
+        self.log_filter = tk.StringVar()
+        ttk.Entry(header, textvariable=self.log_filter, width=32).pack(side="left", padx=5)
+        self.button(header, "Recargar logs", self.refresh_logs)
+        self.button(header, "Aplicar filtro", self.filter_logs)
+        self.button(header, "Exportar visible", self.export_logs)
+        self.logs_widget = tk.Text(page, bg=SURFACE, fg=FG, font=("Consolas", 10),
+                                   wrap="none", relief="flat")
+        self.logs_widget.pack(fill="both", expand=True, padx=12, pady=10)
+        self.raw_logs = ""
+    def refresh_logs(self):
+        name = self.config_data["container"]
+        self.submit("Logs Docker", lambda: docker("logs", "--tail", "500", "--timestamps", name),
+                    self.on_logs)
+    def on_logs(self, content):
+        self.raw_logs = content
+        self.filter_logs()
+    def filter_logs(self):
+        needle = self.log_filter.get().casefold()
+        rows = [line for line in self.raw_logs.splitlines() if needle in line.casefold()]
+        self.logs_widget.delete("1.0", "end")
+        self.logs_widget.insert("1.0", "\n".join(rows))
+    def export_logs(self):
+        path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("TXT","*.txt")])
+        if path:
+            Path(path).write_text(self.logs_widget.get("1.0", "end-1c"), encoding="utf-8")
+            self.log("Logs visibles exportados")
+    def periodic(self):
+        """Auto-refresh every minute; daily backup only with Docker container stopped."""
+        if self.winfo_exists():
+            self.refresh_status()
+            c = self.config_data
+            if c.get("backup_enabled") and not self.backup_busy:
+                try:
+                    if due_daily(datetime.now(), c.get("backup_last", ""), int(c["backup_hour"])):
+                        self.scheduled_backup()
+                except (ValueError, TypeError) as exc:
+                    self.log("Programador: " + str(exc))
+            self.after(60_000, self.periodic)
+    def scheduled_backup(self):
+        self.backup_busy = True
+        c = self.config_data.copy()
+        def job():
+            state = json.loads(docker("inspect", "-f", "{{json .State}}", c["container"]))
+            if state.get("Running"):
+                raise RuntimeError("Backup programado omitido: detén el contenedor para un respaldo consistente")
+            archive = create_verified_backup(c["data_dir"], c["backup_dir"])
+            prune_backups(c["backup_dir"], int(c.get("backup_keep", 7)))
+            return str(archive)
+        def success(result):
+            self.config_data["backup_last"] = datetime.now().date().isoformat()
+            self.persist_settings()
+        self.submit("Backup programado", job, success)
+    def persist_settings(self):
+        CONFIG.write_text(json.dumps(self.config_data, ensure_ascii=False, indent=2), encoding="utf-8")
     def build_backup(self):
         page = self.tab("Backups")
         ttk.Label(page, text="Respaldos manuales", font=("Segoe UI", 16, "bold")).pack(
@@ -281,23 +359,48 @@ class Application(tk.Tk):
         self.button(actions, "Crear backup ZIP", self.create_backup)
         self.button(actions, "Abrir carpeta de backups", self.open_backups)
         self.button(actions, "Verificar backup ZIP", self.verify_backup)
+        self.button(actions, "Preparar restauración segura", self.restore_backup)
+        self.button(actions, "Limpiar backups antiguos", self.cleanup_backups)
         ttk.Label(page, text="Para garantizar consistencia, detén el servidor antes de respaldar.\n"
-                            "Esta versión no restaura automáticamente ni elimina archivos del mundo.").pack(
+                            "Restaurar prepara los archivos en una carpeta nueva, NUNCA sobrescribe el mundo activo.").pack(
             anchor="w", padx=12, pady=12)
     def create_backup(self):
         if not messagebox.askyesno("Copia de seguridad", "¿Confirmas que el servidor está detenido y deseas respaldarlo?"):
             return
-        c = self.config_data
-        self.submit("Backup", lambda: backup_directory(c["data_dir"], c["backup_dir"]))
+        if self.backup_busy:
+            self.log("Ya hay un backup en curso")
+            return
+        self.backup_busy = True
+        c = self.config_data.copy()
+        self.submit("Backup manual", lambda: str(create_verified_backup(c["data_dir"], c["backup_dir"])))
     def verify_backup(self):
         archive = filedialog.askopenfilename(filetypes=[("Backups ZIP", "*.zip")])
         if not archive:
             return
         try:
-            count = safe_extract_plan(Path(archive), Path(self.config_data["data_dir"] or ROOT))
-            self.log(f"Backup válido estructuralmente: {count} entradas. No implica que esté completo.")
+            self.submit("Verificar ZIP", lambda: inspect_backup(archive))
         except Exception as exc:
             messagebox.showerror("Verificar backup", str(exc))
+    def restore_backup(self):
+        archive = filedialog.askopenfilename(filetypes=[("Backups ZIP", "*.zip")])
+        if not archive:
+            return
+        dest = filedialog.askdirectory(title="Selecciona carpeta PADRE para preparar restauración")
+        if not dest:
+            return
+        folder = Path(dest) / ("restore_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+        if not messagebox.askyesno("Restauración protegida",
+                f"Extraer backup validado en carpeta NUEVA:\n{folder}\n"
+                "El mundo activo no será modificado. ¿Continuar?"):
+            return
+        self.submit("Restauración preparada", lambda: stage_restore(archive, folder))
+    def cleanup_backups(self):
+        if not messagebox.askyesno("Retención", "¿Eliminar copias antiguas verificadas, "
+                                   "conservando el número configurado?"):
+            return
+        c = self.config_data.copy()
+        self.submit("Retención backups", lambda: prune_backups(c["backup_dir"],
+                                                              int(c.get("backup_keep", 7))))
     def open_backups(self):
         target = Path(self.config_data["backup_dir"]).expanduser()
         target.mkdir(parents=True, exist_ok=True)
@@ -420,7 +523,8 @@ class Application(tk.Tk):
     def build_settings(self):
         page = self.tab("Ajustes")
         self.fields = {}
-        labels = dict(webhook="Discord webhook HTTPS", container="Nombre contenedor Docker", host="RCON host",
+        labels = dict(backup_enabled="Backup diario (true / false)", backup_hour="Hora backup diario (0-23)",
+                      backup_keep="Cantidad de copias a conservar", webhook="Discord webhook HTTPS", container="Nombre contenedor Docker", host="RCON host",
                       port="RCON puerto", password="RCON contraseña",
                       data_dir="Carpeta local de datos Project Zomboid",
                       ini_file="Ruta de server.ini", backup_dir="Carpeta de backups")
@@ -439,12 +543,18 @@ class Application(tk.Tk):
         try:
             values = {k: v.get().strip() for k, v in self.fields.items()}
             values["port"] = int(values["port"])
+            values["backup_hour"] = int(values["backup_hour"])
+            values["backup_keep"] = int(values["backup_keep"])
+            values["backup_enabled"] = str(values["backup_enabled"]).lower() in ("true", "1", "yes", "si")
+            if not 0 <= values["backup_hour"] <= 23 or not 1 <= values["backup_keep"] <= 365:
+                raise ValueError("Hora (0-23) o retención (1-365) inválida")
+            values["backup_last"] = self.config_data.get("backup_last", "")
             if not 1 <= values["port"] <= 65535:
                 raise ValueError("Puerto fuera de rango")
             if not values["container"]:
                 raise ValueError("Indica el nombre del contenedor")
-            CONFIG.write_text(json.dumps(values, indent=2, ensure_ascii=False), encoding="utf-8")
             self.config_data = values
+            self.persist_settings()
             self.log("Configuración guardada en " + str(CONFIG))
             self.audit.record("configuracion", "ajustes guardados", True)
         except Exception as exc:
