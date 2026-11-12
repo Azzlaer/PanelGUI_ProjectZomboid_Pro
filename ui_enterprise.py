@@ -33,7 +33,7 @@ LIGHT = {
 # navigation layer instead of a rewrite of proven backend logic.
 SECTIONS = (
     ("Dashboard", ("Dashboard",)),
-    ("Servidor", ("Windows Nativo", "Consola RCON")),
+    ("Servidor", ("Consola integrada", "Windows Nativo", "Consola RCON")),
     ("Jugadores", ("Jugadores",)),
     ("Configuración", ("Configuración y Mods", "Ajustes")),
     ("Workshop", ("Workshop Mods",)),
@@ -102,7 +102,7 @@ class EnterpriseChrome:
                  anchor="w").pack(fill="x", padx=20, pady=(0, 26))
         self.nav_host = tk.Frame(self.sidebar, bg=c["sidebar"])
         self.nav_host.pack(fill="both", expand=True, padx=10)
-        tk.Label(self.sidebar, text="PROJECT ZOMBOID  •  v2.0", fg=c["muted"],
+        tk.Label(self.sidebar, text="PROJECT ZOMBOID  •  v2.2", fg=c["muted"],
                  bg=c["sidebar"], font=("Segoe UI", 8)).pack(
                      side="bottom", padx=14, pady=20, anchor="w")
 
