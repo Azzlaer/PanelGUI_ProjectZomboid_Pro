@@ -8,14 +8,13 @@ import struct
 import subprocess
 import threading
 import tkinter as tk
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 from pz_backup import (create_verified_backup, inspect_backup, stage_restore, prune_backups, due_daily)
 from pz_native import ProfileStore, NativeProcess, native_log_tail, steamcmd_arguments, native_launcher_path, validate_profile, DEFAULT_PROFILE
 from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
-                         replace_ini_keys, discord_webhook, safe_extract_plan)
+                         replace_ini_keys, discord_webhook)
 
 ROOT = Path(os.getenv("APPDATA") or Path.home()) / "PanelGUI_ProjectZomboid_Pro"
 ROOT.mkdir(parents=True, exist_ok=True)
@@ -82,21 +81,6 @@ def rcon(host, port, password, cmd):
             if rid == 11:
                 parts.append(value)
         return "".join(parts) or "(Sin respuesta)"
-
-def backup_directory(source, dest):
-    root = Path(source).expanduser().resolve()
-    if not root.is_dir():
-        raise ValueError("Configura una carpeta de datos válida")
-    target = Path(dest).expanduser().resolve()
-    if root == target or root in target.parents:
-        raise ValueError("Los backups deben estar fuera del directorio de datos")
-    target.mkdir(parents=True, exist_ok=True)
-    filename = target / ("zomboid_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".zip")
-    with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-        for file in root.rglob("*"):
-            if file.is_file() and not file.is_symlink():
-                z.write(file, file.relative_to(root))
-    return filename
 
 class Application(tk.Tk):
     def __init__(self):
@@ -680,6 +664,15 @@ class Application(tk.Tk):
 
     def build_settings(self):
         page = self.tab("Ajustes")
+        canvas = tk.Canvas(page, bg=BG, highlightthickness=0)
+        scroll = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        form = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=form, anchor="nw")
+        form.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
         self.fields = {}
         labels = dict(mode="Modo (docker / native)", native_dir="Carpeta servidor Windows",
                       native_launcher="Lanzador (StartServer64.bat)", steamcmd_exe="Ruta steamcmd.exe",
@@ -689,7 +682,7 @@ class Application(tk.Tk):
                       data_dir="Carpeta local de datos Project Zomboid",
                       ini_file="Ruta de server.ini", backup_dir="Carpeta de backups")
         for key, label in labels.items():
-            line = ttk.Frame(page)
+            line = ttk.Frame(form)
             line.pack(fill="x", padx=12, pady=6)
             ttk.Label(line, text=label, width=38).pack(side="left")
             var = tk.StringVar(value=str(self.config_data.get(key, "")))
@@ -708,8 +701,8 @@ class Application(tk.Tk):
                 ttk.Button(line, text="...", width=3,
                     command=lambda k=key, v=var: self.choose_path(k, v)).pack(side="left", padx=4)
             self.fields[key] = var
-        ttk.Button(page, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
-        ttk.Label(page, text="Las credenciales se guardan localmente SIN cifrado. No compartas config.json.").pack(
+        ttk.Button(form, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
+        ttk.Label(form, text="Las credenciales se guardan localmente SIN cifrado. No compartas config.json.").pack(
             anchor="w", padx=12, pady=5)
     def choose_path(self, key, value):
         if key in ("native_dir", "data_dir", "backup_dir"):
