@@ -683,12 +683,31 @@ class Application(tk.Tk):
             line.pack(fill="x", padx=12, pady=6)
             ttk.Label(line, text=label, width=38).pack(side="left")
             var = tk.StringVar(value=str(self.config_data.get(key, "")))
-            ttk.Entry(line, textvariable=var, show="*" if key in ("password", "webhook") else "").pack(
-                side="left", fill="x", expand=True)
+            options = {
+                "mode": ["docker", "native"],
+                "native_launcher": ["StartServer64.bat", "StartServer64_nosteam.bat", "StartServer32.bat"],
+                "backup_enabled": ["False", "True"],
+            }
+            if key in options:
+                ttk.Combobox(line, textvariable=var, values=options[key],
+                             state="readonly").pack(side="left", fill="x", expand=True)
+            else:
+                ttk.Entry(line, textvariable=var, show="*" if key in ("password", "webhook") else "").pack(
+                    side="left", fill="x", expand=True)
+            if key in ("native_dir", "data_dir", "backup_dir", "ini_file", "steamcmd_exe"):
+                ttk.Button(line, text="...", width=3,
+                    command=lambda k=key, v=var: self.choose_path(k, v)).pack(side="left", padx=4)
             self.fields[key] = var
         ttk.Button(page, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
         ttk.Label(page, text="Las credenciales se guardan localmente SIN cifrado. No compartas config.json.").pack(
             anchor="w", padx=12, pady=5)
+    def choose_path(self, key, value):
+        if key in ("native_dir", "data_dir", "backup_dir"):
+            selected = filedialog.askdirectory(title="Seleccionar carpeta")
+        else:
+            selected = filedialog.askopenfilename(title="Seleccionar archivo")
+        if selected:
+            value.set(selected)
     def read_settings(self):
         values = {k: v.get().strip() for k, v in self.fields.items()}
         values["backup_last"] = self.config_data.get("backup_last", "")
