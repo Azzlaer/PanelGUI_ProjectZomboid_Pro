@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 from pz_backup import (create_verified_backup, inspect_backup, stage_restore, prune_backups, due_daily)
+from ui_enterprise import EnterpriseChrome, DARK, LIGHT, set_dpi_awareness
 from pz_native import ProfileStore, NativeProcess, native_log_tail, steamcmd_arguments, native_launcher_path, validate_profile, DEFAULT_PROFILE
 from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
                          replace_ini_keys, discord_webhook)
@@ -90,9 +91,9 @@ class Application(tk.Tk):
         self.profiles = ProfileStore(ROOT / "profiles")
         self.native_process = NativeProcess()
         self.native_log_path = ROOT / "native_server.log"
-        self.title("PanelGUI Project Zomboid PRO | Desktop v1.3")
-        self.geometry("1120x740")
-        self.minsize(850, 580)
+        self.title("PanelGUI Project Zomboid PRO | Enterprise Console v2.0")
+        self.geometry("1380x850")
+        self.minsize(1050, 680)
         self.configure(bg=BG)
         self.events = queue.Queue()
         self.active = None
@@ -109,14 +110,13 @@ class Application(tk.Tk):
         self.style.configure("TNotebook", background=BG)
         self.style.configure("TNotebook.Tab", background=SURFACE, foreground=FG, padding=(15,10))
         self.style.map("TNotebook.Tab", background=[("selected", "#285779")])
-        header = tk.Frame(self, bg=BG)
-        header.pack(fill="x", padx=18, pady=(18, 8))
-        tk.Label(header, text="PROJECT ZOMBOID  /  MANAGER PRO", font=("Segoe UI", 19, "bold"),
-                 fg=ACCENT, bg=BG).pack(side="left")
+        # Professional Windows 11-style shell. Existing functional pages are
+        # preserved inside a hidden-tab notebook, navigated from the sidebar.
         self.state_var = tk.StringVar(value="Sin comprobar")
-        tk.Label(header, textvariable=self.state_var, fg="#7ed4ad", bg=BG).pack(side="right")
-        self.tabs = ttk.Notebook(self)
-        self.tabs.pack(fill="both", expand=True, padx=18, pady=10)
+        self.chrome = EnterpriseChrome(self, self.state_var, on_theme_change=self.apply_theme)
+        self.style.layout("Enterprise.TNotebook", [("Notebook.client", {"sticky": "nswe"})])
+        self.tabs = ttk.Notebook(self.chrome.content, style="Enterprise.TNotebook")
+        self.tabs.pack(fill="both", expand=True)
         self.build_dashboard()
         self.build_rcon()
         self.build_editor()
@@ -128,13 +128,37 @@ class Application(tk.Tk):
         self.build_native()
         self.build_settings()
         self.build_profiles()
+        self.chrome.attach_notebook(self.tabs)
         self.output = tk.Text(self, height=7, bg="#0c1220", fg="#cddced", insertbackground="white",
                               relief="flat", wrap="word", font=("Consolas", 10))
-        self.output.pack(fill="x", padx=18, pady=(0, 14))
+        self.output.pack(fill="x", padx=18, pady=(0, 12))
         self.log("Listo. Configura Docker, RCON y rutas desde Ajustes.")
         self.after(100, self.consume)
         self.after(800, self.refresh_status)
         self.after(60_000, self.periodic)
+    def apply_theme(self, theme):
+        """Update both chrome and existing Tk/ttk content with a unified palette."""
+        colors = LIGHT if theme == "light" else DARK
+        self.chrome.set_theme(theme)
+        self.style.configure(".", background=colors["root"], foreground=colors["text"])
+        self.style.configure("TFrame", background=colors["root"])
+        self.style.configure("TLabel", background=colors["root"], foreground=colors["text"])
+        self.style.configure("TButton", background=colors["surface"], foreground=colors["text"])
+        self.style.map("TButton", background=[("active", colors["active"])])
+        self.style.configure("TEntry", fieldbackground=colors["surface"], foreground=colors["text"])
+        self.style.configure("TCombobox", fieldbackground=colors["surface"], foreground=colors["text"])
+        self.style.configure("Enterprise.TNotebook", background=colors["root"])
+        def visit(widget):
+            if isinstance(widget, tk.Text):
+                widget.configure(bg=colors["surface"], fg=colors["text"],
+                                 insertbackground=colors["text"])
+            for child in widget.winfo_children():
+                visit(child)
+        visit(self.chrome.content)
+        self.output.configure(bg=colors["surface"], fg=colors["text"],
+                              insertbackground=colors["text"])
+        self.log("Tema de navegación y contenido: " + theme)
+
     def log(self, value):
         self.output.insert("end", datetime.now().strftime("[%H:%M:%S] ") + str(value) + "\n")
         self.output.see("end")
@@ -727,4 +751,5 @@ class Application(tk.Tk):
             messagebox.showerror("Ajustes", str(exc))
 
 if __name__ == "__main__":
+    set_dpi_awareness()
     Application().mainloop()
