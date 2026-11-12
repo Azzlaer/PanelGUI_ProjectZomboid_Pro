@@ -35,7 +35,7 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 - **No enviar RCON por Internet abierta**. Usar localhost, red confiable o túnel privado.
 - El archivo local `config.json` guarda la contraseña RCON y el webhook **sin cifrar**: se debe migrar a keyring/DPAPI antes de producción.
 - No manipular `serverPZ.db` del proceso vivo desde el GUI sin protocolo de bloqueo, backup y pruebas de esquema.
-- No hay restauración de ZIP: la verificación de rutas no equivale a un rollback seguro.
+- La restauración de ZIP solo prepara una carpeta nueva; no sustituye el mundo activo ni es rollback automático.
 - El nombre de contenedor en Docker es configurable, pero los volúmenes montados NO son automáticamente rutas en Windows.
 - No borrar mapas/mundos ni actualizar imágenes Docker automáticamente hasta disponer de backup íntegro verificado.
 - Comandos RCON de PZ y soporte de mods cambian según build del juego. Probar en servidor de pruebas antes de producción.
@@ -45,7 +45,7 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 
 1. **v1.1**: GUI de moderación, editor WorkshopItems/Mods, auditoría SQLite, Discord de prueba y recursos Docker. Implementado en código; pendiente prueba real.
 2. **v1.2**: monitoreo básico periódico, filtros/exportación logs, backups SHA-256 con staging y retención, programación diaria mientras GUI abierta. Implementado en código. **Pendiente**: secretos con DPAPI/keyring y tests de RCON mock.
-3. **v1.3**: servidor Windows nativo con SteamCMD y controlador de proceso; perfiles múltiples.
+3. **v1.3**: controlador de arranque Windows nativo, solicitud de parada por RCON, comandos de SteamCMD, perfiles múltiples sin secretos y workflow manual de empaquetado EXE. Implementado en código; sin pruebas de ejecución Windows real.
 4. **v1.4**: whitelist SQLite en offline/snapshot y restauración con verificación de estados.
 5. **v2.x**: sandbox config, estadísticas, programador, Discord eventos y mods metadata.
 6. **v3.x**: diseño puente Lua opcional, mapa e inventario; estudiar tienda solo con modelo transaccional estable.
@@ -53,3 +53,7 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 ## Licencia / atribución
 
 Inspiración funcional: [trongio/Zomboid_Server_Manager_Docker](https://github.com/trongio/Zomboid_Server_Manager_Docker) (AGPL-3.0). Esta implementación es independiente y no copia código de ese repositorio. Si posteriormente incorporamos código original, cumpliremos las condiciones de su licencia.
+
+## v1.3: nota de seguridad
+
+El panel nativo solo supervisa el proceso iniciado en la sesión actual, y no descubre servidores ejecutados por separado. Los scripts StartServer64.bat son archivos locales ejecutables y deben provenir de una instalación confiable. SteamCMD actualiza archivos del servidor: detener previamente también los procesos no gestionados por la GUI. La primera ejecución del juego puede pedir la contraseña del administrador en consola; completar ese inicio manual antes de usar el panel.
