@@ -13,13 +13,20 @@ class MergeIntegrationTests(unittest.TestCase):
         self.assertTrue(callable(pz_features.player_command))
         self.assertTrue(callable(pz_native.NativeProcess))
     def test_native_defaults_are_merged(self):
-        self.assertEqual(main.DEFAULT["mode"], "docker")
+        self.assertEqual(main.DEFAULT["mode"], "native")
         self.assertEqual(main.DEFAULT["steam_app_id"], "380870")
         self.assertEqual(main.DEFAULT["native_launcher"], "StartServer64.bat")
-    def test_app_can_validate_both_modes(self):
-        for mode in ("docker", "native"):
-            profile = pz_native.validate_profile({**main.DEFAULT, "mode": mode})
-            self.assertEqual(profile["mode"], mode)
+    def test_legacy_docker_mode_is_normalized_to_native(self):
+        for old_mode in ("docker", "native"):
+            profile = pz_native.validate_profile({**main.DEFAULT, "mode": old_mode})
+            self.assertEqual(profile["mode"], "native")
+
+    def test_dashboard_uses_native_handler(self):
+        import inspect
+        source = inspect.getsource(main.Application.build_dashboard)
+        self.assertIn('self.button(actions, "Iniciar servidor", self.native_start)', source)
+        self.assertNotIn('container_action', source)
+        self.assertNotIn('Docker', source)
 
 if __name__ == "__main__":
     unittest.main()
