@@ -7,7 +7,7 @@ import main
 class EnterpriseNavigationTests(unittest.TestCase):
     def test_every_existing_tab_is_reachable(self):
         expected = {
-            "Dashboard", "Consola RCON", "Configuración y Mods",
+            "Dashboard", "Consola integrada", "Consola RCON", "Configuración y Mods",
             "Backups", "Jugadores", "Workshop Mods", "Auditoría / Discord",
             "Logs", "Windows Nativo", "Ajustes", "Perfiles",
         }
@@ -16,6 +16,7 @@ class EnterpriseNavigationTests(unittest.TestCase):
 
     def test_group_mapping(self):
         self.assertEqual(section_for_tab("Windows Nativo"), "Servidor")
+        self.assertEqual(section_for_tab("Consola integrada"), "Servidor")
         self.assertEqual(section_for_tab("Consola RCON"), "Servidor")
         self.assertEqual(section_for_tab("Ajustes"), "Configuración")
         self.assertEqual(section_for_tab("Workshop Mods"), "Workshop")
