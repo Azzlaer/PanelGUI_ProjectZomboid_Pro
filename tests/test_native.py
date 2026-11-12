@@ -28,7 +28,7 @@ class NativeTests(unittest.TestCase):
             root = Path(temp)
             script = root / "StartServer64.bat"
             script.write_text("@echo off")
-            self.assertEqual(native_launcher_path({"native_dir": str(root)}), script)
+            self.assertEqual(native_launcher_path({"native_dir": str(root)}).resolve(), script.resolve())
             with self.assertRaises(ValueError):
                 validate_profile({"native_launcher": "dangerous.bat"})
     def test_steamcmd_args(self):
