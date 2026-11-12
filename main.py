@@ -559,12 +559,13 @@ class Application(tk.Tk):
         bar.pack(anchor="w", padx=12)
         self.button(bar, "Comprobar ruta", self.native_check)
         self.button(bar, "Iniciar servidor", self.native_start)
+        self.button(bar, "Detener por RCON", self.native_stop)
         self.button(bar, "Ver log", self.native_show_log)
         self.button(bar, "Instalar / actualizar", self.steamcmd_install)
         self.button(bar, "Validar SteamCMD", lambda: self.steamcmd_install(validate=True))
         ttk.Label(page, text="Selecciona modo native en Ajustes y configura el directorio de instalación.\n"
                   "Solo se supervisan procesos lanzados durante esta sesión.\n"
-                  "Para detenerlo, utiliza los mecanismos oficiales del servidor; no se fuerza su cierre.\n"
+                  "El botón Detener envía quit por RCON; no fuerza el cierre del proceso.\n"
                   "La instalación utiliza SteamCMD local ya instalado por el usuario.").pack(
                       anchor="w", padx=12, pady=14)
         self.native_status = tk.StringVar(value="Sin iniciar")
@@ -590,6 +591,15 @@ class Application(tk.Tk):
             self.refresh_status()
         except Exception as exc:
             messagebox.showerror("Iniciar servidor", str(exc))
+
+    def native_stop(self):
+        if self.config_data.get("mode") != "native":
+            messagebox.showwarning("Modo", "Selecciona native en Ajustes")
+            return
+        if not messagebox.askyesno("Detener servidor", "¿Enviar quit por RCON al servidor configurado? "
+                                   "Verifica host y puerto antes de continuar."):
+            return
+        self.run_rcon_command("quit")
 
     def native_show_log(self):
         self.tabs.select(self.logs_page)
