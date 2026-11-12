@@ -2,7 +2,6 @@
 import json
 import os
 import queue
-import shutil
 import socket
 import struct
 import subprocess
@@ -29,18 +28,12 @@ BG, SURFACE, FG, ACCENT = "#101827", "#1a283a", "#e8f0f8", "#4daee8"
 def load_config():
     try:
         data = json.loads(CONFIG.read_text(encoding="utf-8"))
-        return {**DEFAULT, **{k: v for k, v in data.items() if k in DEFAULT}}
+        saved = {k: v for k, v in data.items() if k in DEFAULT}
+        # Migrate existing Docker mode to native automatically; preserve paths.
+        saved["mode"] = "native"
+        return {**DEFAULT, **saved}
     except (OSError, ValueError):
         return DEFAULT.copy()
-
-def docker(*args, timeout=30):
-    if not shutil.which("docker"):
-        raise RuntimeError("Docker no está instalado o no está en PATH.")
-    proc = subprocess.run(["docker", *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
-    if proc.returncode:
-        raise RuntimeError((proc.stderr or proc.stdout).strip()[:1000])
-    return proc.stdout.strip()
 
 def recv_exact(sock, n):
     buf = bytearray()
@@ -92,7 +85,7 @@ class Application(tk.Tk):
         self.profiles = ProfileStore(ROOT / "profiles")
         self.native_process = NativeProcess()
         self.native_log_path = ROOT / "native_server.log"
-        self.title("PanelGUI Project Zomboid PRO | Enterprise Console v2.0")
+        self.title("PanelGUI Project Zomboid PRO | Windows Local Console v2.1")
         self.geometry("1380x850")
         self.minsize(1050, 680)
         self.configure(bg=BG)
@@ -133,7 +126,7 @@ class Application(tk.Tk):
         self.output = tk.Text(self, height=7, bg="#0c1220", fg="#cddced", insertbackground="white",
                               relief="flat", wrap="word", font=("Consolas", 10))
         self.output.pack(fill="x", padx=18, pady=(0, 12))
-        self.log("Listo. Configura Docker, RCON y rutas desde Ajustes.")
+        self.log("Modo local Windows activo. Selecciona la carpeta con StartServer64.bat y pulsa Iniciar servidor.")
         self.after(100, self.consume)
         self.after(800, self.refresh_status)
         self.after(60_000, self.periodic)
@@ -204,59 +197,36 @@ class Application(tk.Tk):
         return parent
     def build_dashboard(self):
         page = self.tab("Dashboard")
-        ttk.Label(page, text="Control de servidor Docker", font=("Segoe UI", 17, "bold")).pack(anchor="w", padx=12, pady=16)
+        ttk.Label(page, text="Project Zomboid Dedicated Server · Windows",
+                  font=("Segoe UI", 17, "bold")).pack(anchor="w", padx=12, pady=16)
         actions = ttk.Frame(page)
         actions.pack(anchor="w", padx=12)
+        self.button(actions, "Iniciar servidor", self.native_start)
+        self.button(actions, "Detener por RCON", self.native_stop)
         self.button(actions, "Actualizar estado", self.refresh_status)
-        self.button(actions, "Iniciar", lambda: self.container_action("start"))
-        self.button(actions, "Detener", lambda: self.container_action("stop"))
-        self.button(actions, "Reiniciar", lambda: self.container_action("restart"))
-        self.button(actions, "Guardar mundo (RCON)", lambda: self.run_rcon_command("save"))
-        self.button(actions, "Ver logs", self.view_logs)
-        self.button(actions, "CPU / RAM", self.view_stats)
-        self.button(actions, "Iniciar Windows nativo", self.native_start)
-        self.status_text = tk.Text(page, bg=SURFACE, fg=FG, relief="flat", height=15,
-                                   font=("Consolas", 11))
+        self.button(actions, "Guardar mundo", lambda: self.run_rcon_command("save"))
+        self.button(actions, "Consola / Logs", self.view_logs)
+        self.button(actions, "Seleccionar instalación", self.choose_server_installation)
+        self.status_text = tk.Text(page, bg=SURFACE, fg=FG, relief="flat",
+                                   font=("Consolas", 11), height=15)
         self.status_text.pack(fill="both", expand=True, padx=12, pady=15)
+
     def refresh_status(self):
-        if self.config_data.get("mode") == "native":
-            value = self.native_process.status()
-            self.state_var.set("Nativo: " + value)
-            self.status_text.delete("1.0", "end")
-            self.status_text.insert("1.0", value + "\nUsa Windows Nativo para administrar este proceso.")
-            return
-        if self.status_busy:
-            return
-        self.status_busy = True
-        name = self.config_data["container"]
-        self.submit("Estado", lambda: docker("inspect", "-f", "{{json .State}}", name),
-                    self.show_status)
-    def show_status(self, raw):
-        obj = json.loads(raw)
-        state = obj.get("Status", "?")
-        self.state_var.set("Docker: " + state)
+        value = self.native_process.status()
+        self.state_var.set("Servidor local: " + value)
         self.status_text.delete("1.0", "end")
-        self.status_text.insert("end", json.dumps(obj, indent=2, ensure_ascii=False))
-    def container_action(self, action):
-        if self.config_data.get("mode") == "native":
-            messagebox.showinfo("Modo nativo", "Controles Docker no aplicables en modo nativo")
-            return
-        if action in ("stop", "restart") and not messagebox.askyesno(
-                "Confirmar", "¿Ejecutar " + action + " en el contenedor?"):
-            return
-        name = self.config_data["container"]
-        self.submit("Docker " + action, lambda: docker(action, name, timeout=120),
-                    lambda _: self.refresh_status())
+        self.status_text.insert("1.0",
+            "Servidor: " + value + "\n"
+            "Carpeta de instalación: " + (self.config_data.get("native_dir") or "Sin configurar") + "\n"
+            "Lanzador: " + self.config_data.get("native_launcher", "StartServer64.bat") + "\n"
+            "RCON: " + str(self.config_data.get("host", "127.0.0.1")) + ":" +
+            str(self.config_data.get("port", 27015)) + "\n\n"
+            "El estado indica el proceso de consola iniciado por este panel.\n"
+            "Para confirmar que el mundo cargó, revisa la consola y conéctate por RCON.")
+
     def view_logs(self):
         self.tabs.select(self.logs_page)
         self.refresh_logs()
-    def view_stats(self):
-        if self.config_data.get("mode") == "native":
-            self.log("Métricas Docker no disponibles en modo nativo")
-            return
-        name = self.config_data["container"]
-        self.submit("Recursos", lambda: docker("stats", "--no-stream",
-                  "--format", "CPU={{.CPUPerc}} RAM={{.MemUsage}} NET={{.NetIO}}", name))
     def build_rcon(self):
         page = self.tab("Consola RCON")
         ttk.Label(page, text="Comandos administrativos del servidor", font=("Segoe UI", 16, "bold")).pack(
@@ -334,12 +304,20 @@ class Application(tk.Tk):
         self.logs_widget.pack(fill="both", expand=True, padx=12, pady=10)
         self.raw_logs = ""
     def refresh_logs(self):
-        if self.config_data.get("mode") == "native":
-            self.submit("Logs nativos", lambda: native_log_tail(self.native_log_path), self.on_logs)
-            return
-        name = self.config_data["container"]
-        self.submit("Logs Docker", lambda: docker("logs", "--tail", "500", "--timestamps", name),
-                    self.on_logs)
+        self.submit("Logs locales", self.local_log_snapshot, self.on_logs)
+
+    def local_log_snapshot(self):
+        root = Path(self.config_data.get("data_dir") or "").expanduser()
+        if root.is_dir():
+            logs = root / "Logs"
+            if logs.is_dir():
+                entries = [p for p in logs.glob("*.txt") if p.is_file()]
+                if entries:
+                    latest = max(entries, key=lambda p: p.stat().st_mtime)
+                    return "Archivo: " + str(latest) + "\n\n" + native_log_tail(latest)
+        return ("El servidor escribe sus mensajes en la consola Windows abierta.\n"
+                "Los registros del juego suelen guardarse en Zomboid\\Logs.\n"
+                "Configura la carpeta de datos para verlos aquí.")
     def on_logs(self, content):
         self.raw_logs = content
         self.filter_logs()
@@ -354,34 +332,13 @@ class Application(tk.Tk):
             Path(path).write_text(self.logs_widget.get("1.0", "end-1c"), encoding="utf-8")
             self.log("Logs visibles exportados")
     def periodic(self):
-        """Auto-refresh every minute; daily backup only with Docker container stopped."""
+        """Check the local server console periodically."""
         if self.winfo_exists():
             self.native_process.close_log_if_stopped()
             self.refresh_status()
-            c = self.config_data
-            if c.get("backup_enabled") and not self.backup_busy:
-                try:
-                    if due_daily(datetime.now(), c.get("backup_last", ""), int(c["backup_hour"])):
-                        self.scheduled_backup()
-                except (ValueError, TypeError) as exc:
-                    self.log("Programador: " + str(exc))
+            # Scheduled backups remain disabled: a local process might have been
+            # started outside the manager, so filesystem safety cannot be assured.
             self.after(60_000, self.periodic)
-    def scheduled_backup(self):
-        self.backup_busy = True
-        c = self.config_data.copy()
-        def job():
-            if c.get("mode") != "docker":
-                raise RuntimeError("Backup automático nativo no soportado. Usa backup manual con el servidor detenido.")
-            state = json.loads(docker("inspect", "-f", "{{json .State}}", c["container"]))
-            if state.get("Running"):
-                raise RuntimeError("Backup programado omitido: detén el contenedor para un respaldo consistente")
-            archive = create_verified_backup(c["data_dir"], c["backup_dir"])
-            prune_backups(c["backup_dir"], int(c.get("backup_keep", 7)))
-            return str(archive)
-        def success(result):
-            self.config_data["backup_last"] = datetime.now().date().isoformat()
-            self.persist_settings()
-        self.submit("Backup programado", job, success)
     def persist_settings(self):
         CONFIG.write_text(json.dumps(self.config_data, ensure_ascii=False, indent=2), encoding="utf-8")
     def build_backup(self):
@@ -399,7 +356,10 @@ class Application(tk.Tk):
                             "Restaurar prepara los archivos en una carpeta nueva, NUNCA sobrescribe el mundo activo.").pack(
             anchor="w", padx=12, pady=12)
     def create_backup(self):
-        if not messagebox.askyesno("Copia de seguridad", "¿Confirmas que el servidor está detenido y deseas respaldarlo?"):
+        if self.native_process.running():
+            messagebox.showwarning("Backup", "Detén el servidor iniciado por el panel antes de hacer backup.")
+            return
+        if not messagebox.askyesno("Copia de seguridad", "¿Confirmas que ningún servidor está usando esos datos?"):
             return
         if self.backup_busy:
             self.log("Ya hay un backup en curso")
@@ -566,19 +526,39 @@ class Application(tk.Tk):
                   font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=12, pady=14)
         bar = ttk.Frame(page)
         bar.pack(anchor="w", padx=12)
+        self.button(bar, "Seleccionar carpeta", self.choose_server_installation)
         self.button(bar, "Comprobar ruta", self.native_check)
         self.button(bar, "Iniciar servidor", self.native_start)
         self.button(bar, "Detener por RCON", self.native_stop)
         self.button(bar, "Ver log", self.native_show_log)
         self.button(bar, "Instalar / actualizar", self.steamcmd_install)
         self.button(bar, "Validar SteamCMD", lambda: self.steamcmd_install(validate=True))
-        ttk.Label(page, text="Selecciona modo native en Ajustes y configura el directorio de instalación.\n"
+        ttk.Label(page, text="Selecciona una carpeta que contenga StartServer64.bat. No se necesita Docker.\n"
                   "Solo se supervisan procesos lanzados durante esta sesión.\n"
-                  "El botón Detener envía quit por RCON; no fuerza el cierre del proceso.\n"
+                  "La consola se abre visible. Detener usa RCON (no fuerza el cierre).\n"
                   "La instalación utiliza SteamCMD local ya instalado por el usuario.").pack(
                       anchor="w", padx=12, pady=14)
         self.native_status = tk.StringVar(value="Sin iniciar")
         ttk.Label(page, textvariable=self.native_status).pack(anchor="w", padx=12, pady=6)
+
+    def choose_server_installation(self):
+        folder = filedialog.askdirectory(title="Selecciona la carpeta del servidor con StartServer64.bat")
+        if not folder:
+            return False
+        candidate = dict(self.config_data, native_dir=folder, mode="native")
+        try:
+            script = native_launcher_path(candidate)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("Carpeta incorrecta", str(exc) +
+                                 "\n\nDebes seleccionar la carpeta de instalación, no Zomboid\\Server.")
+            return False
+        self.config_data = candidate
+        self.persist_settings()
+        if hasattr(self, "fields") and "native_dir" in self.fields:
+            self.fields["native_dir"].set(str(script.parent))
+        self.native_status.set("Instalación seleccionada: " + str(script.parent))
+        self.refresh_status()
+        return True
 
     def native_check(self):
         try:
@@ -588,13 +568,17 @@ class Application(tk.Tk):
             messagebox.showerror("Comprobar instalación", str(exc))
 
     def native_start(self):
-        if self.config_data.get("mode") != "native":
-            messagebox.showwarning("Modo", "Selecciona native en Ajustes.")
-            return
-        if not messagebox.askyesno("Iniciar servidor", "¿Iniciar el servidor Windows de este perfil?"):
+        try:
+            native_launcher_path(self.config_data)
+        except (ValueError, OSError):
+            if not self.choose_server_installation():
+                return
+        if not messagebox.askyesno("Iniciar servidor",
+                "Se abrirá una ventana de consola Windows para ejecutar StartServer.\n"
+                "En el primer inicio puede solicitar la contraseña de admin. ¿Continuar?"):
             return
         try:
-            pid = self.native_process.start(self.config_data, self.native_log_path)
+            pid = self.native_process.start(self.config_data)
             self.native_status.set("Proceso lanzado con PID " + str(pid))
             self.audit.record("native_start", "PID " + str(pid))
             self.refresh_status()
@@ -602,9 +586,6 @@ class Application(tk.Tk):
             messagebox.showerror("Iniciar servidor", str(exc))
 
     def native_stop(self):
-        if self.config_data.get("mode") != "native":
-            messagebox.showwarning("Modo", "Selecciona native en Ajustes")
-            return
         if not messagebox.askyesno("Detener servidor", "¿Enviar quit por RCON al servidor configurado? "
                                    "Verifica host y puerto antes de continuar."):
             return
@@ -615,9 +596,6 @@ class Application(tk.Tk):
         self.refresh_logs()
 
     def steamcmd_install(self, validate=False):
-        if self.config_data.get("mode") != "native":
-            messagebox.showwarning("SteamCMD", "Selecciona native en Ajustes")
-            return
         try:
             args = steamcmd_arguments(self.config_data, validate=validate)
         except Exception as exc:
@@ -699,10 +677,9 @@ class Application(tk.Tk):
         form.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
         self.fields = {}
-        labels = dict(mode="Modo (docker / native)", native_dir="Carpeta servidor Windows",
+        labels = dict(native_dir="Carpeta de instalación del servidor",
                       native_launcher="Lanzador (StartServer64.bat)", steamcmd_exe="Ruta steamcmd.exe",
-                      steam_app_id="Steam App ID servidor", backup_enabled="Backup diario (true / false)", backup_hour="Hora backup diario (0-23)",
-                      backup_keep="Cantidad de copias a conservar", webhook="Discord webhook HTTPS", container="Nombre contenedor Docker", host="RCON host",
+                      steam_app_id="Steam App ID servidor", backup_keep="Copias que se conservan", webhook="Discord webhook HTTPS", host="RCON host",
                       port="RCON puerto", password="RCON contraseña",
                       data_dir="Carpeta local de datos Project Zomboid",
                       ini_file="Ruta de server.ini", backup_dir="Carpeta de backups")
@@ -712,9 +689,7 @@ class Application(tk.Tk):
             ttk.Label(line, text=label, width=38).pack(side="left")
             var = tk.StringVar(value=str(self.config_data.get(key, "")))
             options = {
-                "mode": ["docker", "native"],
                 "native_launcher": ["StartServer64.bat", "StartServer64_nosteam.bat", "StartServer32.bat"],
-                "backup_enabled": ["False", "True"],
             }
             if key in options:
                 ttk.Combobox(line, textvariable=var, values=options[key],
@@ -767,7 +742,8 @@ class Application(tk.Tk):
     def read_settings(self):
         values = {k: v.get().strip() for k, v in self.fields.items()}
         values["backup_last"] = self.config_data.get("backup_last", "")
-        values["backup_enabled"] = str(values["backup_enabled"]).lower() in ("true", "1", "yes", "si")
+        values["mode"] = "native"
+        values["backup_enabled"] = False
         return validate_profile(values)
     def save_settings(self):
         try:
