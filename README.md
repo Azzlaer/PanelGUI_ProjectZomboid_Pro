@@ -1,10 +1,28 @@
-# PanelGUI Project Zomboid PRO — Windows Local Console
+# PanelGUI Project Zomboid PRO — Enterprise Embedded Console
 
 Administrador gráfico de **Project Zomboid Dedicated Server** para **Windows 11 x64** usando Python 3.10+ y Tkinter. **No requiere Docker**.
 
-## v2.1 — Inicio del servidor local corregido
+## v2.2 — Consola integrada, sin ventanas CMD externas
 
-El botón **Dashboard → Iniciar servidor** ejecuta el lanzador oficial `StartServer64.bat` de tu instalación de Project Zomboid. Abre una **consola Windows interactiva y visible**, por lo que puedes responder preguntas del primer inicio y ver los errores directamente. Si no has definido la instalación, el programa te pide seleccionarla antes de arrancar.
+El servidor **se inicia en segundo plano** utilizando `StartServer64.bat`, con `stdin`, `stdout` y `stderr` conectados a la pestaña **Servidor → Consola integrada**.
+
+- **Iniciar:** ejecuta el servidor Windows sin mostrar una consola externa.
+- **Salida en vivo:** mensajes del juego, errores, advertencias y progreso aparecen dentro de la ventana Python.
+- **Entrada de comandos:** escribe una orden o respuesta en el campo inferior y pulsa **Enviar** / Enter. Puede utilizarse durante la configuración inicial si el juego admite lectura desde entrada estándar.
+- **Autoscroll:** control de desplazamiento automático y límite de líneas para evitar consumo de memoria excesivo.
+- **Acciones:** detener ordenadamente con `quit`, limpiar la vista y exportar la salida.
+- **Persistencia:** la salida también se registra localmente en `%APPDATA%\\PanelGUI_ProjectZomboid_Pro\\native_server.log`.
+- **Sin secretos en eco del GUI:** el campo enviado no se muestra automáticamente en el historial por si contiene la contraseña del primer arranque. No se puede garantizar que el propio juego no incluya información sensible en sus logs.
+- **Cierre protegido:** con el proceso iniciado, el panel solicita apagar antes de cerrar, para no romper su conexión a las tuberías de la consola.
+- La pestaña **Consola RCON** continúa independiente, para administración por red cuando está habilitado.
+
+**Limitación:** los lanzadores de terceros que abren procesos independientes, se desacoplan o usan APIs de consola Windows en vez de entrada/salida estándar podrían no comportarse correctamente con redirección de tuberías. Para esos casos será necesario integrar un adaptador específico. No se ha probado todavía contra tu instalación real.
+
+El acceso directo `iniciar_servidor_windows.bat` ahora abre el manager en la sección Consola integrada. Debes pulsar Iniciar dentro del panel.
+
+## v2.1 — Inicio local
+
+El botón **Dashboard → Iniciar servidor** ejecuta el lanzador oficial `StartServer64.bat` de tu instalación de Project Zomboid. Redirige la salida y entrada del proceso a la **consola integrada** del panel, sin mostrar una ventana CMD externa. Si no has definido la instalación, el programa te pide seleccionarla antes de arrancar.
 
 El modo antiguo Docker ya no aparece en los ajustes y las configuraciones existentes se migran a modo local.
 
@@ -32,19 +50,19 @@ Alternativamente, usa `start.bat`.
 
 1. Abre **Dashboard** y pulsa **Seleccionar instalación**.
 2. Elige la **carpeta donde está `StartServer64.bat`**; por ejemplo, `C:\Servidores\ProjectZomboid`.
-3. Pulsa **Iniciar servidor**. Aparecerá una ventana de consola; no la cierres mientras el servidor deba seguir funcionando.
-4. Sigue las indicaciones del propio servidor, especialmente si solicita la contraseña de administración inicial.
-5. Comprueba la consola antes de intentar conectarte con el juego. Si el lanzador termina inmediatamente, revisa lo que informa Windows (Java, archivos o configuración).
+3. Pulsa **Iniciar servidor**. Ve a **Servidor → Consola integrada** para ver los mensajes y enviar comandos, sin CMD externo.
+4. Sigue las indicaciones del servidor en la consola integrada; si solicita contraseña, ingrésala en el campo de entrada. Algunas versiones o launchers pueden no aceptar entrada redirigida.
+5. Comprueba la consola integrada antes de conectarte. Si el servidor sale inmediatamente, revisa el error mostrado o `native_server.log`.
 
 > **No confundas rutas:** la carpeta de instalación contiene `StartServer64.bat`. La carpeta de datos normalmente está en `%USERPROFILE%\Zomboid` y contiene partidas, logs y `Server\servertest.ini`. **No necesitas rellenar la carpeta de datos ni el INI para pulsar Iniciar.**
 
 ### Alternativa si la GUI principal tiene problemas
 
-Ejecuta **`iniciar_servidor_windows.bat`**. Es un iniciador independiente que lee la instalación guardada o pregunta por una carpeta con `StartServer64.bat`, y abre una consola Windows del servidor.
+Ejecuta **`iniciar_servidor_windows.bat`** para abrir directamente el GUI en la pestaña Consola integrada. Desde allí selecciona la instalación y pulsa Iniciar.
 
 ### Control y estado
 
-- **Iniciar servidor:** abre el lanzador local en consola Windows.
+- **Iniciar servidor:** ejecuta el lanzador local en un proceso oculto y conecta su salida al panel.
 - **Actualizar estado:** comprueba el proceso de consola iniciado desde esta sesión del GUI. No equivale a una comprobación de que el mundo terminó de cargarse.
 - **Detener por RCON:** solicita el cierre usando `quit` con confirmación. Si RCON está deshabilitado, puedes utilizar los controles del servidor directamente desde su consola.
 - **Guardar mundo:** envía `save` por RCON si está habilitado.
@@ -70,7 +88,7 @@ El programador automático antiguo de Docker se **desactivó** en esta modalidad
 
 - El archivo `%APPDATA%\PanelGUI_ProjectZomboid_Pro\config.json` todavía guarda contraseña RCON y webhook sin cifrado; no lo compartas.
 - No expongas RCON a Internet. Usa localhost o una red privada confiable.
-- El administrador supervisa el proceso abierto por esta sesión, no cualquier servidor iniciado externamente. Si un lanzador inicia otros procesos y se cierra, puede dejar de ser posible detectar el proceso real desde el GUI.
+- El administrador supervisa el proceso abierto por esta sesión, no cualquier servidor iniciado externamente. Si el .bat se desacopla o abre otros procesos, la supervisión puede no representar el servidor real.
 - **Las pruebas automáticas pasan en Windows y Linux, Python 3.10 y 3.12**; la ejecución con un servidor Project Zomboid real requiere validación en tu equipo.
 - Para compilar a EXE: **GitHub → Actions → Build Windows EXE → Run workflow**. El archivo generado se obtiene desde los artefactos de la ejecución; no está firmado digitalmente.
 
