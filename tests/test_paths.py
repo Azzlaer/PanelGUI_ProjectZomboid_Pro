@@ -11,7 +11,7 @@ class PathDiscoveryTests(unittest.TestCase):
             target = root / "Zomboid" / "Server"
             target.mkdir(parents=True)
             (target / "servertest.ini").write_text("PVP=false")
-            self.assertEqual(candidate_data_directories(root, {}), [root / "Zomboid"])
+            self.assertEqual(candidate_data_directories(root, {}), [(root / "Zomboid").resolve()])
             self.assertEqual([p.name for p in server_ini_files(root / "Zomboid")],
                              ["servertest.ini"])
 
