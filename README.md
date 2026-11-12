@@ -2,6 +2,20 @@
 
 Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10+ (Tkinter), diseñado para Windows con acceso a Docker y RCON.
 
+## v2.0 Enterprise UI — Sidebar + TabPages + Windows 11 x64
+
+La versión v2.0 agrega un shell administrativo totalmente reorganizado, **sin eliminar los módulos anteriores**:
+
+- **Sidebar izquierda** con categorías Dashboard, Servidor, Jugadores, Configuración, Workshop, Backups, Logs, Perfiles e Integraciones.
+- **Subpestañas contextuales** dentro de los grupos: Servidor → Windows Nativo / Consola RCON; Configuración → Configuración y Mods / Ajustes.
+- **Header de estado** dinámico, navegación contextual, botones con estados y un diseño visual renovado.
+- **Dos temas**, oscuro y claro, con escala DPI preparada para Windows 11.
+- **Detección automática de rutas**: busca ubicaciones habituales de `Zomboid\Server`, precarga carpeta de datos y archivo `.ini` (revisar la selección si hay varios servidores).
+- Las funciones originales siguen en `main.py`, `pz_native.py`, `pz_backup.py` y `pz_features.py`.
+- La nueva interfaz está implementada con **Tkinter/ttk estándar**, sin requerir dependencias visuales externas.
+
+**Alcance de pruebas:** CI verifica compilación, importación de módulos y navegación de pestañas a nivel de datos. Todavía se debe validar la presentación visual y los controles en Windows 11 x64 con un servidor real.
+
 ## v1.3.1 — fusión e integración de módulos
 
 - Dashboard: inspección de estado del contenedor y operaciones de inicio, apagado y reinicio.
@@ -44,7 +58,7 @@ Configura en **Ajustes**: nombre del contenedor, RCON host, puerto y contraseña
 
 ```powershell
 py -3 -m unittest discover -s tests -v
-py -3 -m compileall -q main.py pz_features.py pz_backup.py pz_native.py
+py -3 -m compileall -q main.py pz_features.py pz_backup.py pz_native.py pz_paths.py ui_enterprise.py
 ```
 
 ## Advertencias de seguridad
@@ -88,6 +102,8 @@ Inspiración funcional: [trongio/Zomboid_Server_Manager_Docker](https://github.c
 ## Arquitectura integrada
 
 - `main.py`: punto de entrada GUI; integra backend Docker, RCON, controles y pestañas.
+- `ui_enterprise.py`: navegación lateral, agrupación de TabPages, temas y DPI.
+- `pz_paths.py`: detección local de rutas Zomboid e INI.
 - `pz_native.py`: ejecución nativa Windows, argumentos SteamCMD y perfiles.
 - `pz_backup.py`: backups verificados SHA-256/CRC, staging y retención.
 - `pz_features.py`: moderación, validación de mods, auditoría SQLite y webhook Discord.
