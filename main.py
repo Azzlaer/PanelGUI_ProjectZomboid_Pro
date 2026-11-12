@@ -388,7 +388,13 @@ class Application(tk.Tk):
         dest = filedialog.askdirectory(title="Selecciona carpeta PADRE para preparar restauración")
         if not dest:
             return
-        folder = Path(dest) / ("restore_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+        folder = (Path(dest) / ("restore_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f"))).resolve()
+        live = self.config_data.get("data_dir", "")
+        if live:
+            root = Path(live).expanduser().resolve()
+            if root == folder or root in folder.parents or folder in root.parents:
+                messagebox.showerror("Restauración", "El destino debe estar fuera de la carpeta del mundo activo")
+                return
         if not messagebox.askyesno("Restauración protegida",
                 f"Extraer backup validado en carpeta NUEVA:\n{folder}\n"
                 "El mundo activo no será modificado. ¿Continuar?"):
