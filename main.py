@@ -551,6 +551,123 @@ class Application(tk.Tk):
             return
         self.submit("Test Discord", lambda: discord_webhook(
             endpoint, "Project Zomboid Manager PRO", "Prueba desde el panel de escritorio"))
+    def build_native(self):
+        page = self.tab("Windows Nativo")
+        ttk.Label(page, text="Servidor dedicado Windows sin Docker",
+                  font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=12, pady=14)
+        bar = ttk.Frame(page)
+        bar.pack(anchor="w", padx=12)
+        self.button(bar, "Comprobar ruta", self.native_check)
+        self.button(bar, "Iniciar servidor", self.native_start)
+        self.button(bar, "Ver log", self.native_show_log)
+        self.button(bar, "Instalar / actualizar", self.steamcmd_install)
+        self.button(bar, "Validar SteamCMD", lambda: self.steamcmd_install(validate=True))
+        ttk.Label(page, text="Selecciona modo native en Ajustes y configura el directorio de instalación.\n"
+                  "Solo se supervisan procesos lanzados durante esta sesión.\n"
+                  "Para detenerlo, utiliza los mecanismos oficiales del servidor; no se fuerza su cierre.\n"
+                  "La instalación utiliza SteamCMD local ya instalado por el usuario.").pack(
+                      anchor="w", padx=12, pady=14)
+        self.native_status = tk.StringVar(value="Sin iniciar")
+        ttk.Label(page, textvariable=self.native_status).pack(anchor="w", padx=12, pady=6)
+
+    def native_check(self):
+        try:
+            script = native_launcher_path(self.config_data)
+            self.native_status.set("Encontrado: " + str(script))
+        except Exception as exc:
+            messagebox.showerror("Comprobar instalación", str(exc))
+
+    def native_start(self):
+        if self.config_data.get("mode") != "native":
+            messagebox.showwarning("Modo", "Selecciona native en Ajustes.")
+            return
+        if not messagebox.askyesno("Iniciar servidor", "¿Iniciar el servidor Windows de este perfil?"):
+            return
+        try:
+            pid = self.native_process.start(self.config_data, self.native_log_path)
+            self.native_status.set("Proceso lanzado con PID " + str(pid))
+            self.audit.record("native_start", "PID " + str(pid))
+            self.refresh_status()
+        except Exception as exc:
+            messagebox.showerror("Iniciar servidor", str(exc))
+
+    def native_show_log(self):
+        self.tabs.select(self.logs_page)
+        self.refresh_logs()
+
+    def steamcmd_install(self, validate=False):
+        if self.config_data.get("mode") != "native":
+            messagebox.showwarning("SteamCMD", "Selecciona native en Ajustes")
+            return
+        try:
+            args = steamcmd_arguments(self.config_data, validate=validate)
+        except Exception as exc:
+            messagebox.showerror("SteamCMD", str(exc))
+            return
+        if self.native_process.running():
+            messagebox.showerror("SteamCMD", "Detén el servidor antes de actualizar.")
+            return
+        action = "validar" if validate else "instalar/actualizar"
+        if not messagebox.askyesno("Confirmar SteamCMD",
+                f"¿{action} el servidor en {self.config_data['native_dir']}? "
+                "SteamCMD descargará archivos y puede modificar la instalación."):
+            return
+        def job():
+            proc = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True,
+                                  text=True, errors="replace", timeout=3600)
+            if proc.returncode:
+                raise RuntimeError(f"SteamCMD falló ({proc.returncode}): " +
+                                   (proc.stderr or proc.stdout)[-1500:])
+            return "SteamCMD finalizó. Verifica los archivos instalados."
+        self.submit("SteamCMD", job)
+
+    def build_profiles(self):
+        page = self.tab("Perfiles")
+        ttk.Label(page, text="Perfiles de servidores", font=("Segoe UI", 16, "bold")).pack(
+            anchor="w", padx=12, pady=14)
+        row = ttk.Frame(page)
+        row.pack(fill="x", padx=12)
+        self.profile_name = tk.StringVar(value="Principal")
+        self.profile_combo = ttk.Combobox(row, textvariable=self.profile_name, width=28)
+        self.profile_combo.pack(side="left", padx=5)
+        self.button(row, "Guardar perfil", self.save_profile)
+        self.button(row, "Cargar perfil", self.load_profile)
+        self.button(row, "Actualizar", self.refresh_profiles)
+        ttk.Label(page, text="Los perfiles NO guardan contraseñas ni webhooks.\n"
+                  "Al cargar otro perfil se limpian las credenciales activas.\n"
+                  "Guarda los Ajustes primero y revisa las rutas antes de iniciar.").pack(
+                      anchor="w", padx=12, pady=15)
+        self.refresh_profiles()
+
+    def refresh_profiles(self):
+        self.profile_combo.configure(values=self.profiles.names())
+
+    def save_profile(self):
+        try:
+            values = self.read_settings()
+            path = self.profiles.save(self.profile_name.get(), values)
+            self.log("Perfil guardado: " + str(path))
+            self.refresh_profiles()
+        except Exception as exc:
+            messagebox.showerror("Perfil", str(exc))
+
+    def load_profile(self):
+        if self.native_process.running():
+            messagebox.showerror("Perfil", "No cambies de perfil con un proceso nativo activo.")
+            return
+        try:
+            values = self.profiles.load(self.profile_name.get())
+            values["password"] = ""
+            values["webhook"] = ""
+            self.config_data = {**DEFAULT, **values}
+            self.persist_settings()
+            for key, var in self.fields.items():
+                var.set(str(self.config_data.get(key, "")))
+            self.log("Perfil cargado. Reintroduce credenciales RCON/Discord.")
+            self.refresh_status()
+        except Exception as exc:
+            messagebox.showerror("Perfil", str(exc))
+
     def build_settings(self):
         page = self.tab("Ajustes")
         self.fields = {}
