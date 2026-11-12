@@ -12,11 +12,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
+from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
+                         replace_ini_keys, discord_webhook, safe_extract_plan)
 
 ROOT = Path(os.getenv("APPDATA") or Path.home()) / "PanelGUI_ProjectZomboid_Pro"
 ROOT.mkdir(parents=True, exist_ok=True)
 CONFIG = ROOT / "config.json"
-DEFAULT = dict(container="pz-game-server", host="127.0.0.1", port=27015,
+DEFAULT = dict(webhook="", container="pz-game-server", host="127.0.0.1", port=27015,
                password="", data_dir="", ini_file="", backup_dir=str(ROOT / "backups"))
 BG, SURFACE, FG, ACCENT = "#101827", "#1a283a", "#e8f0f8", "#4daee8"
 
@@ -97,7 +99,8 @@ class Application(tk.Tk):
     def __init__(self):
         super().__init__()
         self.config_data = load_config()
-        self.title("PanelGUI Project Zomboid PRO | Desktop v1.0")
+        self.audit = AuditStore(ROOT / "audit.sqlite3")
+        self.title("PanelGUI Project Zomboid PRO | Desktop v1.1")
         self.geometry("1120x740")
         self.minsize(850, 580)
         self.configure(bg=BG)
@@ -126,6 +129,9 @@ class Application(tk.Tk):
         self.build_rcon()
         self.build_editor()
         self.build_backup()
+        self.build_players()
+        self.build_mods()
+        self.build_activity()
         self.build_settings()
         self.output = tk.Text(self, height=7, bg="#0c1220", fg="#cddced", insertbackground="white",
                               relief="flat", wrap="word", font=("Consolas", 10))
@@ -150,8 +156,11 @@ class Application(tk.Tk):
                 kind, label, result, callback = self.events.get_nowait()
                 if kind == "error":
                     self.log("ERROR " + label + ": " + result)
+                    self.audit.record("error", label, False)
                 else:
                     self.log(label + ": " + str(result)[:1800])
+                    if not label.startswith("Estado"):
+                        self.audit.record("accion", label, True)
                     if callback:
                         callback(result)
         except queue.Empty:
@@ -174,6 +183,7 @@ class Application(tk.Tk):
         self.button(actions, "Reiniciar", lambda: self.container_action("restart"))
         self.button(actions, "Guardar mundo (RCON)", lambda: self.run_rcon_command("save"))
         self.button(actions, "Ver logs", self.view_logs)
+        self.button(actions, "CPU / RAM", self.view_stats)
         self.status_text = tk.Text(page, bg=SURFACE, fg=FG, relief="flat", height=15,
                                    font=("Consolas", 11))
         self.status_text.pack(fill="both", expand=True, padx=12, pady=15)
@@ -197,6 +207,10 @@ class Application(tk.Tk):
     def view_logs(self):
         name = self.config_data["container"]
         self.submit("Logs Docker", lambda: docker("logs", "--tail", "120", name))
+    def view_stats(self):
+        name = self.config_data["container"]
+        self.submit("Recursos", lambda: docker("stats", "--no-stream",
+                  "--format", "CPU={{.CPUPerc}} RAM={{.MemUsage}} NET={{.NetIO}}", name))
     def build_rcon(self):
         page = self.tab("Consola RCON")
         ttk.Label(page, text="Comandos administrativos del servidor", font=("Segoe UI", 16, "bold")).pack(
@@ -266,6 +280,7 @@ class Application(tk.Tk):
         actions.pack(anchor="w", padx=12)
         self.button(actions, "Crear backup ZIP", self.create_backup)
         self.button(actions, "Abrir carpeta de backups", self.open_backups)
+        self.button(actions, "Verificar backup ZIP", self.verify_backup)
         ttk.Label(page, text="Para garantizar consistencia, detén el servidor antes de respaldar.\n"
                             "Esta versión no restaura automáticamente ni elimina archivos del mundo.").pack(
             anchor="w", padx=12, pady=12)
@@ -274,6 +289,15 @@ class Application(tk.Tk):
             return
         c = self.config_data
         self.submit("Backup", lambda: backup_directory(c["data_dir"], c["backup_dir"]))
+    def verify_backup(self):
+        archive = filedialog.askopenfilename(filetypes=[("Backups ZIP", "*.zip")])
+        if not archive:
+            return
+        try:
+            count = safe_extract_plan(Path(archive), Path(self.config_data["data_dir"] or ROOT))
+            self.log(f"Backup válido estructuralmente: {count} entradas. No implica que esté completo.")
+        except Exception as exc:
+            messagebox.showerror("Verificar backup", str(exc))
     def open_backups(self):
         target = Path(self.config_data["backup_dir"]).expanduser()
         target.mkdir(parents=True, exist_ok=True)
@@ -281,10 +305,122 @@ class Application(tk.Tk):
             os.startfile(target)
         else:
             messagebox.showinfo("Carpeta", str(target))
+    def build_players(self):
+        page = self.tab("Jugadores")
+        ttk.Label(page, text="Moderación vía RCON", font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=12, pady=14)
+        self.player_name = tk.StringVar()
+        self.player_role = tk.StringVar(value="moderator")
+        self.player_item = tk.StringVar(value="Base.Axe")
+        row = ttk.Frame(page)
+        row.pack(fill="x", padx=12, pady=5)
+        ttk.Label(row, text="Usuario").pack(side="left", padx=5)
+        ttk.Entry(row, textvariable=self.player_name, width=28).pack(side="left", padx=5)
+        ttk.Label(row, text="Rol").pack(side="left", padx=5)
+        ttk.Combobox(row, textvariable=self.player_role, values=[
+            "admin", "moderator", "overseer", "gm", "observer", "none"
+        ], state="readonly", width=13).pack(side="left", padx=5)
+        row2 = ttk.Frame(page)
+        row2.pack(fill="x", padx=12)
+        self.button(row2, "Lista de jugadores", lambda: self.run_rcon_command("players"))
+        self.button(row2, "Expulsar", lambda: self.player_action("kickuser"))
+        self.button(row2, "Banear", lambda: self.player_action("banuser"))
+        self.button(row2, "Desbanear", lambda: self.player_action("unbanuser"))
+        self.button(row2, "Aplicar nivel", lambda: self.player_action("setaccesslevel", self.player_role.get()))
+        row3 = ttk.Frame(page)
+        row3.pack(fill="x", padx=12)
+        ttk.Label(row3, text="ID del ítem").pack(side="left", padx=5)
+        ttk.Entry(row3, textvariable=self.player_item, width=25).pack(side="left", padx=5)
+        self.button(row3, "Entregar ítem", lambda: self.player_action("additem", self.player_item.get()))
+        ttk.Label(page, text="Los comandos disponibles y los roles pueden variar según la versión del servidor.").pack(
+            anchor="w", padx=12, pady=10)
+    def player_action(self, action, value=""):
+        try:
+            command = player_command(action, self.player_name.get(), value)
+        except ValueError as exc:
+            messagebox.showerror("Validación", str(exc))
+            return
+        if action in ("banuser", "kickuser", "setaccesslevel", "additem") and not messagebox.askyesno(
+                "Confirmación", "Ejecutar: " + command + " ?"):
+            return
+        self.run_rcon_command(command)
+    def build_mods(self):
+        page = self.tab("Workshop Mods")
+        ttk.Label(page, text="Mods por parejas Workshop ID + Mod ID", font=("Segoe UI", 16, "bold")).pack(
+            anchor="w", padx=12, pady=12)
+        self.workshop_ids = tk.StringVar()
+        self.mod_ids = tk.StringVar()
+        for title, var in (("WorkshopItems (separados por ;)", self.workshop_ids),
+                           ("Mods (separados por ;)", self.mod_ids)):
+            ttk.Label(page, text=title).pack(anchor="w", padx=12, pady=(8, 2))
+            ttk.Entry(page, textvariable=var).pack(fill="x", padx=12)
+        row = ttk.Frame(page)
+        row.pack(anchor="w", padx=12, pady=8)
+        self.button(row, "Leer del server.ini", self.load_mods)
+        self.button(row, "Validar parejas", self.validate_mods)
+        self.button(row, "Guardar mods (con respaldo)", self.save_mods)
+        ttk.Label(page, text="El ID numérico de Workshop NO siempre coincide con el Mod ID interno.\n"
+                            "Se necesita reiniciar el servidor para aplicar los cambios.").pack(
+            anchor="w", padx=12, pady=10)
+    def load_mods(self):
+        try:
+            data = parse_ini(self.ini_path().read_text(encoding="utf-8-sig"))
+            self.workshop_ids.set(data.get("WorkshopItems", ""))
+            self.mod_ids.set(data.get("Mods", ""))
+            self.log("IDs de mods cargados")
+        except Exception as exc:
+            messagebox.showerror("Mods", str(exc))
+    def validate_mods(self):
+        try:
+            pairs = parse_mod_pairs(self.workshop_ids.get(), self.mod_ids.get())
+            self.log("Mods validados: " + str(len(pairs)) + " parejas")
+        except Exception as exc:
+            messagebox.showerror("Mods", str(exc))
+    def save_mods(self):
+        try:
+            pairs = parse_mod_pairs(self.workshop_ids.get(), self.mod_ids.get())
+            if not messagebox.askyesno("Guardar mods", f"Guardar {len(pairs)} mods. Se creará respaldo del INI. ¿Continuar?"):
+                return
+            path = self.ini_path()
+            original = path.read_text(encoding="utf-8-sig")
+            updated = replace_ini_keys(original, {
+                "WorkshopItems": ";".join(x[0] for x in pairs),
+                "Mods": ";".join(x[1] for x in pairs)})
+            bak = path.with_suffix(path.suffix + "." + datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".bak")
+            bak.write_text(original, encoding="utf-8")
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(updated, encoding="utf-8")
+            os.replace(tmp, path)
+            self.log("Mods guardados en INI. Reiniciar servidor. Respaldo: " + str(bak))
+            self.audit.record("mods", str(len(pairs)) + " pares", True)
+        except Exception as exc:
+            messagebox.showerror("Guardar mods", str(exc))
+    def build_activity(self):
+        page = self.tab("Auditoría / Discord")
+        ttk.Label(page, text="Auditoría local de acciones", font=("Segoe UI", 16, "bold")).pack(
+            anchor="w", padx=12, pady=12)
+        row = ttk.Frame(page)
+        row.pack(anchor="w", padx=12)
+        self.button(row, "Recargar historial", self.show_audit)
+        self.button(row, "Enviar webhook de prueba", self.test_discord)
+        self.audit_box = tk.Text(page, bg=SURFACE, fg=FG, relief="flat",
+                                 font=("Consolas", 10))
+        self.audit_box.pack(fill="both", expand=True, padx=12, pady=10)
+        self.show_audit()
+    def show_audit(self):
+        self.audit_box.delete("1.0", "end")
+        for stamp, kind, detail, success in self.audit.recent(100):
+            self.audit_box.insert("end", f"{stamp} [{kind}] {detail} {'OK' if success else 'ERROR'}\n")
+    def test_discord(self):
+        endpoint = self.config_data.get("webhook", "").strip()
+        if not endpoint:
+            messagebox.showwarning("Discord", "Configura webhook en Ajustes")
+            return
+        self.submit("Test Discord", lambda: discord_webhook(
+            endpoint, "Project Zomboid Manager PRO", "Prueba desde el panel de escritorio"))
     def build_settings(self):
         page = self.tab("Ajustes")
         self.fields = {}
-        labels = dict(container="Nombre contenedor Docker", host="RCON host",
+        labels = dict(webhook="Discord webhook HTTPS", container="Nombre contenedor Docker", host="RCON host",
                       port="RCON puerto", password="RCON contraseña",
                       data_dir="Carpeta local de datos Project Zomboid",
                       ini_file="Ruta de server.ini", backup_dir="Carpeta de backups")
@@ -293,7 +429,7 @@ class Application(tk.Tk):
             line.pack(fill="x", padx=12, pady=6)
             ttk.Label(line, text=label, width=38).pack(side="left")
             var = tk.StringVar(value=str(self.config_data.get(key, "")))
-            ttk.Entry(line, textvariable=var, show="*" if key == "password" else "").pack(
+            ttk.Entry(line, textvariable=var, show="*" if key in ("password", "webhook") else "").pack(
                 side="left", fill="x", expand=True)
             self.fields[key] = var
         ttk.Button(page, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
@@ -310,6 +446,7 @@ class Application(tk.Tk):
             CONFIG.write_text(json.dumps(values, indent=2, ensure_ascii=False), encoding="utf-8")
             self.config_data = values
             self.log("Configuración guardada en " + str(CONFIG))
+            self.audit.record("configuracion", "ajustes guardados", True)
         except Exception as exc:
             messagebox.showerror("Ajustes", str(exc))
 
