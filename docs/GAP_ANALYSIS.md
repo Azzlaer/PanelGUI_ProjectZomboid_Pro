@@ -9,8 +9,8 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 | Capacidad | Estado PanelGUI | Pendiente |
 |---|---|---|
 | Docker start/stop/restart e inspect | Básico | Gestión de imágenes y updates |
-| Docker logs | Básico | Auto-refresh, filtros y exportación |
-| Docker CPU/RAM | Bajo demanda | Gráficos y muestreo |
+| Docker logs | Filtros, recarga y exportación | Auto-refresh independiente de estado y rotación de archivos |
+| Docker CPU/RAM | Bajo demanda | Gráficos y muestreo histórico |
 | RCON / consola | Básico | Historia persistente, autocompletado y tolerancia multipaquete |
 | Moderación (kick/ban/unban/access level) | Controles RCON | Confirmar sintaxis con versión del juego |
 | Entrega de objetos | Comando RCON | Registro fiable de entrega |
@@ -18,7 +18,7 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 | Mods Workshop | Edición pareada y validación | Catálogo Steam, reordenamiento y metadatos |
 | server.ini | Editor, backup antes de guardar | Formularios categorizados, validación por versión |
 | Sandbox Lua | Ausente | Editor y validación |
-| Respaldos | ZIP manual y comprobación de rutas ZIP | Programados, retención, restauración con snapshot |
+| Respaldos | ZIP SHA256/CRC, programación diaria en GUI, retención y restauración en carpeta separada | Backup en caliente coherente y rollback atómico |
 | SQLite | Auditoría local | Whitelist, métricas históricas y estadísticas |
 | Discord | Webhook de prueba manual | Alertas por evento, switches, reintentos y cuotas |
 | Whitelist | Ausente | Acceso seguro a serverPZ.db y migraciones |
@@ -44,7 +44,7 @@ Fecha de revisión: 2026-11-11. Referencia: [README upstream](https://github.com
 ## Plan de entregas
 
 1. **v1.1**: GUI de moderación, editor WorkshopItems/Mods, auditoría SQLite, Discord de prueba y recursos Docker. Implementado en código; pendiente prueba real.
-2. **v1.2**: secretos con DPAPI/keyring, monitoreo periódico con errores visibles, filtrado de logs, backups ZIP robustos, tests con RCON mock.
+2. **v1.2**: monitoreo básico periódico, filtros/exportación logs, backups SHA-256 con staging y retención, programación diaria mientras GUI abierta. Implementado en código. **Pendiente**: secretos con DPAPI/keyring y tests de RCON mock.
 3. **v1.3**: servidor Windows nativo con SteamCMD y controlador de proceso; perfiles múltiples.
 4. **v1.4**: whitelist SQLite en offline/snapshot y restauración con verificación de estados.
 5. **v2.x**: sandbox config, estadísticas, programador, Discord eventos y mods metadata.
