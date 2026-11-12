@@ -172,7 +172,7 @@ class Application(tk.Tk):
                     self.log("ERROR " + label + ": " + result)
                     self.audit.record("error", label, False)
                     if label == "Estado":
-                        self.state_var.set("Docker: error")
+                        self.state_var.set("Servidor local: error")
                         self.status_busy = False
                     if label.startswith("Backup"):
                         self.backup_busy = False
