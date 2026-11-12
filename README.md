@@ -2,7 +2,7 @@
 
 Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10+ (Tkinter), diseñado para Windows con acceso a Docker y RCON.
 
-## v1.3 — funcionalidades implementadas en código
+## v1.3.1 — fusión e integración de módulos
 
 - Dashboard: inspección de estado del contenedor y operaciones de inicio, apagado y reinicio.
 - Métricas Docker a demanda: CPU, RAM y tráfico de red.
@@ -22,6 +22,8 @@ Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10
 - **SteamCMD**: instalar/actualizar y validar el servidor dedicado (app ID 380870) desde la GUI; SteamCMD debe estar previamente instalado.
 - **Perfiles**: guardar y cargar rutas, modo docker/native y preferencias sin copiar contraseñas ni webhooks entre servidores.
 - **Compilación EXE**: workflow manual de GitHub Actions para construir `PanelGUI_ProjectZomboid_Pro.exe`.
+- **Fusión v1.3.1**: eliminado el backup antiguo duplicado; se usa el motor de respaldos SHA-256 desde `pz_backup.py`.
+- Ajustes con desplazamiento vertical para acceder a todos los campos, y pruebas de integración entre módulos.
 - Estilo oscuro, trabajos Docker/RCON/Discord fuera del hilo principal de Tkinter.
 
 **Nota:** publicado en GitHub; esta versión no se ha probado todavía contra una instalación real de Project Zomboid.
@@ -82,3 +84,15 @@ Consulta [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) para una matriz de capacid
 ## Créditos
 
 Inspiración funcional: [trongio/Zomboid_Server_Manager_Docker](https://github.com/trongio/Zomboid_Server_Manager_Docker) (AGPL-3.0). El código de este repositorio es una implementación independiente en Python; no se ha trasladado el código original.
+
+## Arquitectura integrada
+
+- `main.py`: punto de entrada GUI; integra backend Docker, RCON, controles y pestañas.
+- `pz_native.py`: ejecución nativa Windows, argumentos SteamCMD y perfiles.
+- `pz_backup.py`: backups verificados SHA-256/CRC, staging y retención.
+- `pz_features.py`: moderación, validación de mods, auditoría SQLite y webhook Discord.
+- `tests/`: pruebas unitarias y prueba de integración sin interfaz gráfica real.
+- `.github/workflows/python.yml`: pruebas en Python 3.10 y 3.12.
+- `.github/workflows/windows-exe.yml`: compilación manual del ejecutable Windows.
+
+Esta es una **aplicación modular integrada**, no un único archivo Python monolítico: hay un solo punto de entrada (`main.py`) y módulos especializados mantenibles. La ejecución de ventanas reales, SteamCMD y un servidor conectado sigue requiriendo pruebas en Windows.
