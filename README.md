@@ -2,7 +2,7 @@
 
 Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10+ (Tkinter), diseñado para Windows con acceso a Docker y RCON.
 
-## v1.2 — funcionalidades implementadas en código
+## v1.3 — funcionalidades implementadas en código
 
 - Dashboard: inspección de estado del contenedor y operaciones de inicio, apagado y reinicio.
 - Métricas Docker a demanda: CPU, RAM y tráfico de red.
@@ -18,6 +18,10 @@ Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10
 - Consulta periódica del estado Docker cada minuto mientras el GUI esté abierto.
 - Auditoría SQLite local de acciones y errores (`audit.sqlite3`).
 - Integración de **prueba manual** de webhook Discord.
+- **Windows Nativo**: ejecutar un servidor existente a través de `StartServer64.bat`, comprobar el archivo y leer su log local.
+- **SteamCMD**: instalar/actualizar y validar el servidor dedicado (app ID 380870) desde la GUI; SteamCMD debe estar previamente instalado.
+- **Perfiles**: guardar y cargar rutas, modo docker/native y preferencias sin copiar contraseñas ni webhooks entre servidores.
+- **Compilación EXE**: workflow manual de GitHub Actions para construir `PanelGUI_ProjectZomboid_Pro.exe`.
 - Estilo oscuro, trabajos Docker/RCON/Discord fuera del hilo principal de Tkinter.
 
 **Nota:** publicado en GitHub; esta versión no se ha probado todavía contra una instalación real de Project Zomboid.
@@ -38,7 +42,7 @@ Configura en **Ajustes**: nombre del contenedor, RCON host, puerto y contraseña
 
 ```powershell
 py -3 -m unittest discover -s tests -v
-py -3 -m compileall -q main.py pz_features.py pz_backup.py
+py -3 -m compileall -q main.py pz_features.py pz_backup.py pz_native.py
 ```
 
 ## Advertencias de seguridad
@@ -49,6 +53,21 @@ py -3 -m compileall -q main.py pz_features.py pz_backup.py
 - Los nuevos backups usan SHA-256 y CRC; los ZIP antiguos pueden verificarse solo por CRC. La restauración se **prepara** en directorio nuevo sin afectar el mundo activo. El reemplazo final requiere operación manual offline.
 - La compatibilidad de comandos RCON (incluidos jugadores/ítems) depende del build PZ.
 - `server.ini` y los archivos sandbox pueden depender de versión/build.
+
+## Windows nativo / SteamCMD
+
+1. Instala SteamCMD por tu cuenta y apunta a `steamcmd.exe`. La aplicación no descarga SteamCMD por sí misma.
+2. En **Ajustes**, escribe `native` como modo, la ruta de instalación y el lanzador `StartServer64.bat` (por defecto).
+3. Abre **Windows Nativo** y utiliza **Instalar / actualizar** para ejecutar SteamCMD. El juego se descarga de Steam con app ID **380870**, iniciando sesión anónimamente. **No actualices mientras el servidor esté en ejecución.**
+4. En el **primer arranque**, es preferible ejecutar manualmente el .bat para completar cualquier pregunta interactiva de contraseña administrador y revisar los ajustes de memoria de Java. Una vez configurado, el panel podrá lanzarlo y capturar los logs.
+5. Los procesos lanzados fuera de la GUI no se detectan ni detienen automáticamente; el botón de apagar y reiniciar del dashboard sigue siendo exclusivo de Docker.
+6. En **Perfiles**, guarda configuraciones por servidor. Los perfiles excluyen contraseña RCON y webhook; vuelve a ingresarlos al cambiar de servidor.
+
+**Nota:** el controlador nativo requiere Windows. Se utiliza el lanzador .bat del servidor; no se gestionan servicios Windows, reinicios automáticos ni actualización del servidor vivo. El backup automático v1.2 sigue siendo **solo Docker**. Los backups manuales de un servidor nativo deben hacerse con el servidor detenido.
+
+## Archivo EXE de Windows
+
+En GitHub ve a **Actions → Build Windows EXE → Run workflow**. Si la compilación finaliza correctamente, descarga el artifact `PanelGUI_ProjectZomboid_Pro-Windows`. El EXE no está firmado digitalmente. No se genera una release automáticamente.
 
 ## Backup diario
 
