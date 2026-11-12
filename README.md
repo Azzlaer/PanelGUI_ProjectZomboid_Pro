@@ -60,7 +60,7 @@ py -3 -m compileall -q main.py pz_features.py pz_backup.py pz_native.py
 2. En **Ajustes**, escribe `native` como modo, la ruta de instalación y el lanzador `StartServer64.bat` (por defecto).
 3. Abre **Windows Nativo** y utiliza **Instalar / actualizar** para ejecutar SteamCMD. El juego se descarga de Steam con app ID **380870**, iniciando sesión anónimamente. **No actualices mientras el servidor esté en ejecución.**
 4. En el **primer arranque**, es preferible ejecutar manualmente el .bat para completar cualquier pregunta interactiva de contraseña administrador y revisar los ajustes de memoria de Java. Una vez configurado, el panel podrá lanzarlo y capturar los logs.
-5. Los procesos lanzados fuera de la GUI no se detectan ni detienen automáticamente; el botón de apagar y reiniciar del dashboard sigue siendo exclusivo de Docker.
+5. Los procesos lanzados fuera de la GUI no se detectan automáticamente. En **Windows Nativo**, «Detener por RCON» solicita un cierre con el comando `quit`; no hay terminación forzada. Los botones principales de Docker solo funcionan en modo Docker.
 6. En **Perfiles**, guarda configuraciones por servidor. Los perfiles excluyen contraseña RCON y webhook; vuelve a ingresarlos al cambiar de servidor.
 
 **Nota:** el controlador nativo requiere Windows. Se utiliza el lanzador .bat del servidor; no se gestionan servicios Windows, reinicios automáticos ni actualización del servidor vivo. El backup automático v1.2 sigue siendo **solo Docker**. Los backups manuales de un servidor nativo deben hacerse con el servidor detenido.
