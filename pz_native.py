@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]{0,39}$")
 DEFAULT_PROFILE = {
-    "mode": "docker", "container": "pz-game-server", "host": "127.0.0.1",
+    "mode": "native", "container": "pz-game-server", "host": "127.0.0.1",
     "port": 27015, "data_dir": "", "ini_file": "", "backup_dir": "",
     "webhook": "", "backup_enabled": False, "backup_hour": 3,
     "backup_keep": 7, "backup_last": "",
@@ -27,10 +27,8 @@ def validate_profile(config: dict) -> dict:
     if not isinstance(config, dict):
         raise ValueError("El perfil debe ser un objeto")
     p = {**DEFAULT_PROFILE, **config}
-    if p["mode"] not in ("docker", "native"):
-        raise ValueError("Modo no soportado")
-    if not isinstance(p.get("container"), str) or not p["container"].strip():
-        raise ValueError("Indica un contenedor")
+    # Project Zomboid Manager now targets local Windows server execution only.
+    p["mode"] = "native"
     try:
         p["port"] = int(p["port"])
         p["backup_hour"] = int(p["backup_hour"])
@@ -116,7 +114,7 @@ def steamcmd_arguments(config, *, validate=False):
 
 
 class NativeProcess:
-    """Managed Windows process owned by this GUI session."""
+    """Managed interactive Windows console owned by this GUI session."""
     def __init__(self):
         self.process = None
         self.log = None
@@ -127,25 +125,27 @@ class NativeProcess:
         with self.lock:
             return self.process is not None and self.process.poll() is None
 
-    def start(self, config, log_path):
+    def start(self, config, log_path=None):
+        """Run the official .bat in a VISIBLE, interactive Windows console.
+
+        A first-run admin-password prompt must be visible to the operator.
+        This tracks the launched batch command process, not unrelated services.
+        """
         if os.name != "nt":
-            raise RuntimeError("El controlador nativo se usa solamente en Windows")
+            raise RuntimeError("El servidor nativo solo se puede iniciar en Windows")
         script = native_launcher_path(config)
         root = script.parent
-        path = Path(log_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock:
             if self.process is not None and self.process.poll() is None:
-                raise RuntimeError("Ya existe un servidor nativo iniciado desde el panel")
+                raise RuntimeError("Ya existe una consola de servidor iniciada desde el panel")
             if self.log:
                 self.log.close()
-            self.log = path.open("ab", buffering=0)
-            # cmd.exe is required for .bat. /d disables AutoRun; /c invokes supplied batch file.
-            # The launcher filename is whitelisted and all paths are resolved from the local profile.
+                self.log = None
+            # cmd /d disables AutoRun; /c call executes only the trusted,
+            # allowlisted batch filename from the configured server directory.
             self.process = subprocess.Popen(
-                ["cmd.exe", "/d", "/c", script.name],
-                cwd=str(root), stdin=subprocess.DEVNULL, stdout=self.log,
-                stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                ["cmd.exe", "/d", "/c", "call", script.name],
+                cwd=str(root), creationflags=subprocess.CREATE_NEW_CONSOLE)
             self.directory = root
             return self.process.pid
 
@@ -154,7 +154,7 @@ class NativeProcess:
             if self.process is None:
                 return "No iniciado por este panel"
             rc = self.process.poll()
-            return f"Ejecutando PID {self.process.pid}" if rc is None else f"Finalizado (código {rc})"
+            return f"Consola activa · PID {self.process.pid}" if rc is None else f"Consola finalizada (código {rc})"
 
     def close_log_if_stopped(self):
         with self.lock:
