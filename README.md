@@ -1,10 +1,39 @@
-# PanelGUI Project Zomboid PRO
+# PanelGUI Project Zomboid PRO — Windows Local Console
 
-Administrador de escritorio para **Project Zomboid** desarrollado en Python 3.10+ (Tkinter), diseñado para Windows con acceso a Docker y RCON.
+**Administrador gráfico de Project Zomboid Dedicated Server para Windows 11 x64. No requiere Docker.**
+
+## Corrección v2.1: arranque local sin Docker
+
+Se eliminó el selector Docker/Native de la interfaz y el botón principal **Iniciar servidor** ahora invoca el lanzador local `StartServer64.bat`. El sistema migra automáticamente los ajustes antiguos en modo Docker a modo local Windows.
+
+### Cómo iniciar el servidor
+
+1. Instala **Project Zomboid Dedicated Server** con SteamCMD o desde Steam Tools. Necesitas los archivos reales del servidor, en particular `StartServer64.bat`.
+2. Abre la aplicación con `start.bat` o `py -3 main.py`.
+3. En **Dashboard → Seleccionar instalación** (o **Servidor → Windows Nativo**) elige la carpeta de instalación que contiene `StartServer64.bat`. **No** elijas `%USERPROFILE%Zomboid`: esa es la carpeta de partidas, configuraciones y datos.
+4. Pulsa **Iniciar servidor**. Se abre una **ventana de consola Windows visible**. En el primer inicio puede solicitar la contraseña del administrador.
+5. Los datos del mundo normalmente se crean en `%USERPROFILE%Zomboid`, y el INI en `%USERPROFILE%ZomboidServerservertest.ini`. Esas rutas se configuran aparte y no son obligatorias para ejecutar `StartServer64.bat`.
+6. Para enviar comandos desde el GUI, habilita RCON en la configuración del servidor y proporciona su host, puerto y contraseña en Ajustes. El cierre por RCON usa el comando `quit` con confirmación.
+
+### Rutas: son dos cosas distintas
+
+| Campo | Ejemplo | ¿Necesario para iniciar? |
+|---|---|---|
+| Instalación del servidor | `C:ServidoresProjectZomboid` — debe incluir `StartServer64.bat` | **Sí** |
+| Carpeta de datos | `C:UsersTU_USUARIOZomboid` | No |
+| Configuración INI | `C:UsersTU_USUARIOZomboidServerservertest.ini` | No |
+| SteamCMD | `C:SteamCMDsteamcmd.exe` | Solo para instalar/actualizar |
+| RCON | `127.0.0.1:27015` | Solo para comandos/stop remoto |
+
+**Estado:** validado mediante pruebas de Python, sin prueba todavía contra un servidor Project Zomboid real en Windows. En caso de error de juego/Java, revisa la ventana de consola; la aplicación no fuerza la terminación de procesos de terceros.
+
+**Backups:** solo manuales, con confirmación explícita de que el mundo está detenido; el programador anterior está desactivado al pasar a nativo para evitar copias inconsistentes.
+
+---
 
 ## v2.0 Enterprise UI — Sidebar + TabPages + Windows 11 x64
 
-La versión v2.0 agrega un shell administrativo totalmente reorganizado, **sin eliminar los módulos anteriores**:
+La versión v2.0 agrega un shell administrativo totalmente reorganizado, **conservando los módulos locales y quitando la dependencia Docker del flujo de ejecución**:
 
 - **Sidebar izquierda** con categorías Dashboard, Servidor, Jugadores, Configuración, Workshop, Backups, Logs, Perfiles e Integraciones.
 - **Subpestañas contextuales** dentro de los grupos: Servidor → Windows Nativo / Consola RCON; Configuración → Configuración y Mods / Ajustes.
@@ -18,17 +47,17 @@ La versión v2.0 agrega un shell administrativo totalmente reorganizado, **sin e
 
 ## v1.3.1 — fusión e integración de módulos
 
-- Dashboard: inspección de estado del contenedor y operaciones de inicio, apagado y reinicio.
-- Métricas Docker a demanda: CPU, RAM y tráfico de red.
+- Dashboard: iniciar consola de servidor Windows, estado del proceso lanzado y solicitud de parada RCON.
+- Ejecución interactiva de StartServer64.bat en una consola Windows visible.
 - Consola RCON: comandos manuales, jugadores, guardado y ayuda.
 - Moderación: kick, ban, unban, nivel de acceso y entrega de ítems con validación de argumentos y confirmaciones.
 - Editor `server.ini` con respaldo local previo.
 - Gestor visual básico de `WorkshopItems` y `Mods`: validación de parejas, edición y respaldo del INI.
 - Backups ZIP con manifiesto SHA-256 y verificación CRC/archivos. Escritura temporal y publicación al terminar.
 - Preparación segura de restauración en carpeta nueva y separada: **no sobrescribe el mundo activo**.
-- Backups programados diariamente (requieren GUI abierta; solo se ejecutan cuando el contenedor Docker está detenido).
+- El antiguo backup programado Docker está deshabilitado en modo local hasta incorporar una comprobación robusta de estado offline.
 - Rotación manual o posterior a backup diario; conserva número configurable de copias del formato propio.
-- Pestaña de logs Docker con filtro de texto, recarga y exportación a TXT.
+- Logs locales del servidor con filtro de texto, recarga y exportación a TXT.
 - Consulta periódica del estado Docker cada minuto mientras el GUI esté abierto.
 - Auditoría SQLite local de acciones y errores (`audit.sqlite3`).
 - Integración de **prueba manual** de webhook Discord.
