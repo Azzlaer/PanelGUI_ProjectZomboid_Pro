@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 from pz_backup import (create_verified_backup, inspect_backup, stage_restore, prune_backups, due_daily)
 from ui_enterprise import EnterpriseChrome, DARK, LIGHT, set_dpi_awareness
+from pz_paths import candidate_data_directories, server_ini_files
 from pz_native import ProfileStore, NativeProcess, native_log_tail, steamcmd_arguments, native_launcher_path, validate_profile, DEFAULT_PROFILE
 from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
                          replace_ini_keys, discord_webhook)
@@ -725,9 +726,37 @@ class Application(tk.Tk):
                 ttk.Button(line, text="...", width=3,
                     command=lambda k=key, v=var: self.choose_path(k, v)).pack(side="left", padx=4)
             self.fields[key] = var
-        ttk.Button(form, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
+        toolbar = ttk.Frame(form)
+        toolbar.pack(fill="x", padx=12, pady=12)
+        ttk.Button(toolbar, text="Detectar rutas de Project Zomboid",
+                   command=self.detect_zomboid_paths).pack(side="left", padx=4)
+        ttk.Button(toolbar, text="Guardar ajustes",
+                   command=self.save_settings).pack(side="left", padx=4)
         ttk.Label(form, text="Las credenciales se guardan localmente SIN cifrado. No compartas config.json.").pack(
             anchor="w", padx=12, pady=5)
+    def detect_zomboid_paths(self):
+        candidates = candidate_data_directories()
+        if not candidates:
+            messagebox.showinfo("Rutas", "No se encontró un directorio Zomboid con subcarpeta Server. "
+                                "Si lo ejecutas como otro usuario, selecciona la ruta manualmente.")
+            return
+        directory = candidates[0]
+        if len(candidates) > 1:
+            messagebox.showinfo("Rutas encontradas", "Se seleccionará la primera ruta detectada:\n" +
+                                "\n".join(map(str, candidates[:10])) +
+                                "\nPuedes escoger otra manualmente.")
+        self.fields["data_dir"].set(str(directory))
+        ini_files = server_ini_files(directory)
+        if ini_files:
+            self.fields["ini_file"].set(str(ini_files[0]))
+            self.log("Carpeta y archivo INI detectados: " + str(directory))
+            if len(ini_files) > 1:
+                messagebox.showinfo("Varios servidores", "Se encontró más de un INI en Server. "
+                                    "Confirma el archivo correcto antes de guardar:\n" +
+                                    "\n".join(p.name for p in ini_files[:12]))
+        else:
+            self.log("Carpeta de datos detectada, pero sin archivos INI. Inicia el servidor una vez.")
+
     def choose_path(self, key, value):
         if key in ("native_dir", "data_dir", "backup_dir"):
             selected = filedialog.askdirectory(title="Seleccionar carpeta")
