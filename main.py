@@ -13,13 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
 from pz_backup import (create_verified_backup, inspect_backup, stage_restore, prune_backups, due_daily)
+from pz_native import ProfileStore, NativeProcess, native_log_tail, steamcmd_arguments, native_launcher_path, validate_profile, DEFAULT_PROFILE
 from pz_features import (AuditStore, player_command, parse_ini, parse_mod_pairs,
                          replace_ini_keys, discord_webhook, safe_extract_plan)
 
 ROOT = Path(os.getenv("APPDATA") or Path.home()) / "PanelGUI_ProjectZomboid_Pro"
 ROOT.mkdir(parents=True, exist_ok=True)
 CONFIG = ROOT / "config.json"
-DEFAULT = dict(backup_hour=3, backup_enabled=False, backup_last="", backup_keep=7,
+DEFAULT = dict(DEFAULT_PROFILE, backup_hour=3, backup_enabled=False, backup_last="", backup_keep=7,
                webhook="", container="pz-game-server", host="127.0.0.1", port=27015,
                password="", data_dir="", ini_file="", backup_dir=str(ROOT / "backups"))
 BG, SURFACE, FG, ACCENT = "#101827", "#1a283a", "#e8f0f8", "#4daee8"
@@ -102,7 +103,10 @@ class Application(tk.Tk):
         super().__init__()
         self.config_data = load_config()
         self.audit = AuditStore(ROOT / "audit.sqlite3")
-        self.title("PanelGUI Project Zomboid PRO | Desktop v1.2")
+        self.profiles = ProfileStore(ROOT / "profiles")
+        self.native_process = NativeProcess()
+        self.native_log_path = ROOT / "native_server.log"
+        self.title("PanelGUI Project Zomboid PRO | Desktop v1.3")
         self.geometry("1120x740")
         self.minsize(850, 580)
         self.configure(bg=BG)
@@ -137,7 +141,9 @@ class Application(tk.Tk):
         self.build_mods()
         self.build_activity()
         self.build_logs()
+        self.build_native()
         self.build_settings()
+        self.build_profiles()
         self.output = tk.Text(self, height=7, bg="#0c1220", fg="#cddced", insertbackground="white",
                               relief="flat", wrap="word", font=("Consolas", 10))
         self.output.pack(fill="x", padx=18, pady=(0, 14))
@@ -199,10 +205,17 @@ class Application(tk.Tk):
         self.button(actions, "Guardar mundo (RCON)", lambda: self.run_rcon_command("save"))
         self.button(actions, "Ver logs", self.view_logs)
         self.button(actions, "CPU / RAM", self.view_stats)
+        self.button(actions, "Iniciar Windows nativo", self.native_start)
         self.status_text = tk.Text(page, bg=SURFACE, fg=FG, relief="flat", height=15,
                                    font=("Consolas", 11))
         self.status_text.pack(fill="both", expand=True, padx=12, pady=15)
     def refresh_status(self):
+        if self.config_data.get("mode") == "native":
+            value = self.native_process.status()
+            self.state_var.set("Nativo: " + value)
+            self.status_text.delete("1.0", "end")
+            self.status_text.insert("1.0", value + "\nUsa Windows Nativo para administrar este proceso.")
+            return
         if self.status_busy:
             return
         self.status_busy = True
@@ -216,6 +229,9 @@ class Application(tk.Tk):
         self.status_text.delete("1.0", "end")
         self.status_text.insert("end", json.dumps(obj, indent=2, ensure_ascii=False))
     def container_action(self, action):
+        if self.config_data.get("mode") == "native":
+            messagebox.showinfo("Modo nativo", "Controles Docker no aplicables en modo nativo")
+            return
         if action in ("stop", "restart") and not messagebox.askyesno(
                 "Confirmar", "¿Ejecutar " + action + " en el contenedor?"):
             return
@@ -226,6 +242,9 @@ class Application(tk.Tk):
         self.tabs.select(self.logs_page)
         self.refresh_logs()
     def view_stats(self):
+        if self.config_data.get("mode") == "native":
+            self.log("Métricas Docker no disponibles en modo nativo")
+            return
         name = self.config_data["container"]
         self.submit("Recursos", lambda: docker("stats", "--no-stream",
                   "--format", "CPU={{.CPUPerc}} RAM={{.MemUsage}} NET={{.NetIO}}", name))
@@ -306,6 +325,9 @@ class Application(tk.Tk):
         self.logs_widget.pack(fill="both", expand=True, padx=12, pady=10)
         self.raw_logs = ""
     def refresh_logs(self):
+        if self.config_data.get("mode") == "native":
+            self.submit("Logs nativos", lambda: native_log_tail(self.native_log_path), self.on_logs)
+            return
         name = self.config_data["container"]
         self.submit("Logs Docker", lambda: docker("logs", "--tail", "500", "--timestamps", name),
                     self.on_logs)
@@ -325,6 +347,7 @@ class Application(tk.Tk):
     def periodic(self):
         """Auto-refresh every minute; daily backup only with Docker container stopped."""
         if self.winfo_exists():
+            self.native_process.close_log_if_stopped()
             self.refresh_status()
             c = self.config_data
             if c.get("backup_enabled") and not self.backup_busy:
@@ -338,6 +361,8 @@ class Application(tk.Tk):
         self.backup_busy = True
         c = self.config_data.copy()
         def job():
+            if c.get("mode") != "docker":
+                raise RuntimeError("Backup automático nativo no soportado. Usa backup manual con el servidor detenido.")
             state = json.loads(docker("inspect", "-f", "{{json .State}}", c["container"]))
             if state.get("Running"):
                 raise RuntimeError("Backup programado omitido: detén el contenedor para un respaldo consistente")
@@ -529,7 +554,9 @@ class Application(tk.Tk):
     def build_settings(self):
         page = self.tab("Ajustes")
         self.fields = {}
-        labels = dict(backup_enabled="Backup diario (true / false)", backup_hour="Hora backup diario (0-23)",
+        labels = dict(mode="Modo (docker / native)", native_dir="Carpeta servidor Windows",
+                      native_launcher="Lanzador (StartServer64.bat)", steamcmd_exe="Ruta steamcmd.exe",
+                      steam_app_id="Steam App ID servidor", backup_enabled="Backup diario (true / false)", backup_hour="Hora backup diario (0-23)",
                       backup_keep="Cantidad de copias a conservar", webhook="Discord webhook HTTPS", container="Nombre contenedor Docker", host="RCON host",
                       port="RCON puerto", password="RCON contraseña",
                       data_dir="Carpeta local de datos Project Zomboid",
@@ -545,20 +572,14 @@ class Application(tk.Tk):
         ttk.Button(page, text="Guardar ajustes", command=self.save_settings).pack(anchor="w", padx=12, pady=16)
         ttk.Label(page, text="Las credenciales se guardan localmente SIN cifrado. No compartas config.json.").pack(
             anchor="w", padx=12, pady=5)
+    def read_settings(self):
+        values = {k: v.get().strip() for k, v in self.fields.items()}
+        values["backup_last"] = self.config_data.get("backup_last", "")
+        values["backup_enabled"] = str(values["backup_enabled"]).lower() in ("true", "1", "yes", "si")
+        return validate_profile(values)
     def save_settings(self):
         try:
-            values = {k: v.get().strip() for k, v in self.fields.items()}
-            values["port"] = int(values["port"])
-            values["backup_hour"] = int(values["backup_hour"])
-            values["backup_keep"] = int(values["backup_keep"])
-            values["backup_enabled"] = str(values["backup_enabled"]).lower() in ("true", "1", "yes", "si")
-            if not 0 <= values["backup_hour"] <= 23 or not 1 <= values["backup_keep"] <= 365:
-                raise ValueError("Hora (0-23) o retención (1-365) inválida")
-            values["backup_last"] = self.config_data.get("backup_last", "")
-            if not 1 <= values["port"] <= 65535:
-                raise ValueError("Puerto fuera de rango")
-            if not values["container"]:
-                raise ValueError("Indica el nombre del contenedor")
+            values = self.read_settings()
             self.config_data = values
             self.persist_settings()
             self.log("Configuración guardada en " + str(CONFIG))
