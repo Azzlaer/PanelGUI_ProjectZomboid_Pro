@@ -85,7 +85,7 @@ class Application(tk.Tk):
         self.profiles = ProfileStore(ROOT / "profiles")
         self.native_process = NativeProcess()
         self.native_log_path = ROOT / "native_server.log"
-        self.title("PanelGUI Project Zomboid PRO | Windows Local Console v2.1")
+        self.title("PanelGUI Project Zomboid PRO | Enterprise Embedded Console v2.2")
         self.geometry("1380x850")
         self.minsize(1050, 680)
         self.configure(bg=BG)
@@ -112,6 +112,7 @@ class Application(tk.Tk):
         self.tabs = ttk.Notebook(self.chrome.content, style="Enterprise.TNotebook")
         self.tabs.pack(fill="both", expand=True)
         self.build_dashboard()
+        self.build_console()
         self.build_rcon()
         self.build_editor()
         self.build_backup()
@@ -130,6 +131,7 @@ class Application(tk.Tk):
         self.after(100, self.consume)
         self.after(800, self.refresh_status)
         self.after(60_000, self.periodic)
+        self.protocol("WM_DELETE_WINDOW", self.on_app_close)
     def apply_theme(self, theme):
         """Update both chrome and existing Tk/ttk content with a unified palette."""
         colors = LIGHT if theme == "light" else DARK
@@ -153,6 +155,15 @@ class Application(tk.Tk):
                               insertbackground=colors["text"])
         self.log("Tema de navegación y contenido: " + theme)
 
+    def on_app_close(self):
+        if self.native_process.running():
+            messagebox.showwarning("Servidor activo",
+                "El servidor sigue ejecutándose dentro del panel.\n"
+                "Envia 'quit' desde Consola integrada, verifica que finalice y luego cierra la aplicación.")
+            self.chrome.go_tab("Consola integrada")
+            return
+        self.destroy()
+
     def log(self, value):
         self.output.insert("end", datetime.now().strftime("[%H:%M:%S] ") + str(value) + "\n")
         self.output.see("end")
@@ -168,6 +179,13 @@ class Application(tk.Tk):
         try:
             while True:
                 kind, label, result, callback = self.events.get_nowait()
+                if kind == "native_output":
+                    self.append_console(result)
+                    continue
+                if kind == "native_exit":
+                    self.append_console("\n[Proceso finalizado con código " + str(result) + "]\n")
+                    self.refresh_status()
+                    continue
                 if kind == "error":
                     self.log("ERROR " + label + ": " + result)
                     self.audit.record("error", label, False)
@@ -205,7 +223,8 @@ class Application(tk.Tk):
         self.button(actions, "Detener por RCON", self.native_stop)
         self.button(actions, "Actualizar estado", self.refresh_status)
         self.button(actions, "Guardar mundo", lambda: self.run_rcon_command("save"))
-        self.button(actions, "Consola / Logs", self.view_logs)
+        self.button(actions, "Consola integrada", lambda: self.chrome.go_tab("Consola integrada"))
+        self.button(actions, "Logs", self.view_logs)
         self.button(actions, "Seleccionar instalación", self.choose_server_installation)
         self.status_text = tk.Text(page, bg=SURFACE, fg=FG, relief="flat",
                                    font=("Consolas", 11), height=15)
@@ -222,11 +241,87 @@ class Application(tk.Tk):
             "RCON: " + str(self.config_data.get("host", "127.0.0.1")) + ":" +
             str(self.config_data.get("port", 27015)) + "\n\n"
             "El estado indica el proceso de consola iniciado por este panel.\n"
-            "Para confirmar que el mundo cargó, revisa la consola y conéctate por RCON.")
+            "El estado del proceso no confirma que el mundo haya terminado de cargar.\n"
+            "Abre Consola integrada para leer la salida o escribir comandos.")
 
     def view_logs(self):
         self.tabs.select(self.logs_page)
         self.refresh_logs()
+    def build_console(self):
+        page = self.tab("Consola integrada")
+        ttk.Label(page, text="Consola en vivo · Servidor Project Zomboid",
+                  font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        ttk.Label(page, text="Salida del servidor en tiempo real, sin ventanas CMD externas. "
+                  "Los comandos se envían al proceso local.",
+                  font=("Segoe UI", 10)).pack(anchor="w", padx=12, pady=(0, 8))
+        toolbar = ttk.Frame(page)
+        toolbar.pack(fill="x", padx=12)
+        self.button(toolbar, "Iniciar", self.native_start)
+        self.button(toolbar, "Detener (quit)", self.native_stop)
+        self.button(toolbar, "Limpiar vista", self.clear_console)
+        self.button(toolbar, "Exportar salida", self.export_console)
+        self.console_autoscroll = tk.BooleanVar(value=True)
+        ttk.Checkbutton(toolbar, text="Auto-scroll", variable=self.console_autoscroll).pack(
+            side="left", padx=8)
+        console_frame = ttk.Frame(page)
+        console_frame.pack(fill="both", expand=True, padx=12, pady=(6, 4))
+        self.console_text = tk.Text(
+            console_frame, bg="#0a111d", fg="#cbe9d7", insertbackground="#ffffff",
+            font=("Consolas", 10), relief="flat", wrap="word", state="disabled")
+        scrollbar = ttk.Scrollbar(console_frame, orient="vertical", command=self.console_text.yview)
+        self.console_text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.console_text.pack(side="left", fill="both", expand=True)
+        row = ttk.Frame(page)
+        row.pack(fill="x", padx=12, pady=(3, 10))
+        ttk.Label(row, text="> ").pack(side="left")
+        self.console_input = tk.StringVar()
+        self.console_entry = ttk.Entry(row, textvariable=self.console_input)
+        self.console_entry.pack(side="left", fill="x", expand=True, padx=5)
+        self.console_entry.bind("<Return>", lambda _event: self.send_console_input())
+        self.button(row, "Enviar", self.send_console_input)
+        self.append_console(
+            "[Consola lista] Pulsa Iniciar. Si es el primer arranque, "
+            "puedes responder desde este campo.\n")
+
+    def append_console(self, text):
+        if not hasattr(self, "console_text"):
+            return
+        self.console_text.configure(state="normal")
+        self.console_text.insert("end", text)
+        # Keep last ~3,000 lines to limit Tk memory growth.
+        lines = int(self.console_text.index("end-1c").split(".")[0])
+        if lines > 3200:
+            self.console_text.delete("1.0", f"{lines - 3000}.0")
+        if self.console_autoscroll.get():
+            self.console_text.see("end")
+        self.console_text.configure(state="disabled")
+
+    def clear_console(self):
+        self.console_text.configure(state="normal")
+        self.console_text.delete("1.0", "end")
+        self.console_text.configure(state="disabled")
+
+    def export_console(self):
+        target = filedialog.asksaveasfilename(defaultextension=".txt",
+                    filetypes=[("Archivo de texto", "*.txt")])
+        if target:
+            Path(target).write_text(self.console_text.get("1.0", "end-1c"),
+                                    encoding="utf-8")
+            self.log("Consola exportada: " + target)
+
+    def send_console_input(self):
+        command = self.console_input.get()
+        if not command.strip():
+            return
+        try:
+            self.native_process.send(command)
+            self.console_input.set("")
+            # Deliberately don't echo input: first-run admin passwords are sensitive.
+            self.append_console("[Entrada enviada al servidor]\n")
+        except (RuntimeError, ValueError, OSError) as exc:
+            messagebox.showerror("Consola", str(exc))
+
     def build_rcon(self):
         page = self.tab("Consola RCON")
         ttk.Label(page, text="Comandos administrativos del servidor", font=("Segoe UI", 16, "bold")).pack(
@@ -530,12 +625,13 @@ class Application(tk.Tk):
         self.button(bar, "Comprobar ruta", self.native_check)
         self.button(bar, "Iniciar servidor", self.native_start)
         self.button(bar, "Detener por RCON", self.native_stop)
+        self.button(bar, "Consola integrada", lambda: self.chrome.go_tab("Consola integrada"))
         self.button(bar, "Ver log", self.native_show_log)
         self.button(bar, "Instalar / actualizar", self.steamcmd_install)
         self.button(bar, "Validar SteamCMD", lambda: self.steamcmd_install(validate=True))
         ttk.Label(page, text="Selecciona una carpeta que contenga StartServer64.bat. No se necesita Docker.\n"
                   "Solo se supervisan procesos lanzados durante esta sesión.\n"
-                  "La consola se abre visible. Detener usa RCON (no fuerza el cierre).\n"
+                  "La consola está integrada en la GUI. Detener envía quit a la entrada local.\n"
                   "La instalación utiliza SteamCMD local ya instalado por el usuario.").pack(
                       anchor="w", padx=12, pady=14)
         self.native_status = tk.StringVar(value="Sin iniciar")
@@ -574,22 +670,35 @@ class Application(tk.Tk):
             if not self.choose_server_installation():
                 return
         if not messagebox.askyesno("Iniciar servidor",
-                "Se abrirá una ventana de consola Windows para ejecutar StartServer.\n"
+                "Se iniciará el servidor sin abrir ninguna ventana CMD externa.\n"
                 "En el primer inicio puede solicitar la contraseña de admin. ¿Continuar?"):
             return
         try:
-            pid = self.native_process.start(self.config_data)
+            pid = self.native_process.start(
+                self.config_data, self.native_log_path,
+                on_output=lambda chunk: self.events.put(("native_output", "stdout", chunk, None)),
+                on_exit=lambda code: self.events.put(("native_exit", "exit", code, None)))
             self.native_status.set("Proceso lanzado con PID " + str(pid))
+            self.chrome.go_tab("Consola integrada")
+            self.append_console("\n[Iniciado proceso Windows PID " + str(pid) + "]\n")
             self.audit.record("native_start", "PID " + str(pid))
             self.refresh_status()
         except Exception as exc:
             messagebox.showerror("Iniciar servidor", str(exc))
 
     def native_stop(self):
-        if not messagebox.askyesno("Detener servidor", "¿Enviar quit por RCON al servidor configurado? "
-                                   "Verifica host y puerto antes de continuar."):
+        if not self.native_process.running():
+            messagebox.showinfo("Servidor", "No hay un proceso local activo.")
             return
-        self.run_rcon_command("quit")
+        if not messagebox.askyesno("Apagar servidor",
+                "¿Enviar el comando quit al proceso local?\n"
+                "El juego debe guardar sus datos y apagarse de forma ordenada."):
+            return
+        try:
+            self.native_process.send("quit")
+            self.append_console("[Solicitado apagado del servidor: quit]\n")
+        except (RuntimeError, OSError) as exc:
+            messagebox.showerror("Apagar servidor", str(exc))
 
     def native_show_log(self):
         self.tabs.select(self.logs_page)
